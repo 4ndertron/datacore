@@ -3,7 +3,6 @@ from . import data_type_conversions
 import sqlite3 as sql
 
 
-# @time_all_class_methods
 class Sql:
     def __init__(self, database=None, console_output=False):
         self.master_table_dat = None
@@ -42,15 +41,6 @@ class Sql:
         new_table_text = f'create table {table_name} ({column_text})'
         print(f'debug new_table_text: "{new_table_text}"')
         self.run_query_text(new_table_text)
-
-        # print(f'debugging *args {args}')
-        # for arg in args:
-        #     print(f'arg: {arg}')
-        #
-        # for kwarg in kwargs:
-        #     print(f'kwarg: {kwarg} | kwargs[kwarg]: {kwargs[kwarg]}')
-        # for k, v in kwargs.items():
-        #     print(f'k: {k} | v: {v}')
 
     def populate_table(self, *args, **kwargs):
         inval = data_type_conversions

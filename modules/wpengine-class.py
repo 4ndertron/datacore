@@ -23,11 +23,13 @@ class WPEngineDb:
         self.cur = None
 
 
-pitt_db = mysql.connector.connect(
-    host='liftenergypitt.sftp.wpengine.com',
-    user='liftenergypitt',
-    password='QUyTPoGFUq3E5BI1hzwd',
-    port=13306
-)
+if __name__ == '__main__':
 
-print(pitt_db)
+    pitt_db = mysql.connector.connect(
+        host='liftenergypitt.sftp.wpengine.com',
+        user='liftenergypitt',
+        password='QUyTPoGFUq3E5BI1hzwd',
+        port=13306
+    )
+
+    print(pitt_db)

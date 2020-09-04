@@ -1,5 +1,7 @@
 import os
 import re
+import pandas as pd
+from sqlalchemy import create_engine
 
 project_dir = os.path.join(os.environ['userprofile'], 'PycharmProjects', 'datacore')
 modules_dir = os.path.join(project_dir, 'modules')
