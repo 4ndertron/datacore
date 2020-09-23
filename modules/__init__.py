@@ -1,6 +1,7 @@
 import os
 import re
 import pandas as pd
+import sqlalchemy as sa
 from enum import Enum
 from sqlalchemy import create_engine
 

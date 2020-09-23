@@ -1,0 +1,7 @@
+with cte1 as (
+select wp.
+from wp_liftenergypitt as wp
+)
+
+select *
+from cte1

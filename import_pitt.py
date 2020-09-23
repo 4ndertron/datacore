@@ -1,9 +1,11 @@
 import os
 import pandas as pd
+import sqlalchemy as sa
 from sqlalchemy import create_engine
 from modules.project_enums import Engines
 from modules.project_enums import HandlerParams
 from modules.project_enums import Messages
+from modules.project_enums import SQLText
 
 env = os.environ
 hp = HandlerParams
@@ -11,7 +13,7 @@ hp = HandlerParams
 
 class SqliteHandler:
     def __init__(self, **kwargs):
-        self.default = 'sqlite:///../data/foo.db'
+        self.default = 'sqlite:///./data/foo.db'
         self.name = Engines.sqlite_engine_name.value
         self.engine = None
         self._setup_engine()
@@ -72,8 +74,8 @@ def establish_engines():
         name=pitt_name,
     )
 
-    local_wp_host = 'db'
-    local_wp_port = '3306'
+    local_wp_host = '10.1.10.38'
+    local_wp_port = '23306'
     local_wp_user = 'wordpress'
     local_wp_pswd = 'wordpress'
     local_wp_name = Engines.local_wp_engine_name.value
@@ -86,15 +88,36 @@ def establish_engines():
         name=local_wp_name,
     )
 
-    pitt_url = f'mysql://{pitt_user}:{pitt_pswd}@{pitt_host}:{pitt_port}'
-    pitt_engine = create_engine(pitt_url)
-
     sqlite_engine = SqliteHandler()
     return {local_wp_engine.name: local_wp_engine,
             pitt_engine.name: pitt_engine,
             sqlite_engine.name: sqlite_engine}
 
 
-if __name__ == '__main__':
+def parse_types():
+    # get distinct post types
+    #     generate a query for each post type
+    #     return a df that needs to be pivoted.
+    return 0
+
+
+def pivot_attempt():
     engines = establish_engines()
-    print(engines)
+    wp = engines[Engines.local_wp_engine_name.value]
+    export_db = engines[Engines.sqlite_engine_name.value]
+    qt = SQLText.test_pivot_original.value
+    wpdf = pd.read_sql(qt, wp.engine, index_col='meta_id')
+    wp_pivot = wpdf.pivot(index='post_id', columns='meta_key', values='meta_value')
+    return {'original_df': wpdf, 'pivot_df': wp_pivot, 'export_db': export_db}
+
+
+if __name__ == '__main__':
+    setup = pivot_attempt()
+    original = setup['original_df']
+    piv = setup['pivot_df']
+    export = setup['export_db']
+    piv.to_sql(name='meta_pivot_values',
+               con=export.engine,
+               if_exists='replace',
+               # schema='wp_liftenergypitt',
+               index_label='post_id')

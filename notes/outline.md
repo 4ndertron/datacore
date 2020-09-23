@@ -12,4 +12,9 @@ Primary language set for handling.
     - original attempt at connecting to the wpengine production site's mysql database.
     - May be replaced.
 # SQL
+The instance of WP Engine that hosts The Pitt runs on 
+MySql version 5.7. CTE syntax is not introduced until
+MySql version 8.X. This is another reason why a central
+database for business intelligence is highly recommended.
+If absolutely necessary, you can nest statements together.
 # Docker

@@ -1,4 +1,5 @@
 from enum import Enum
+from . import sa
 
 
 class HandlerParams(Enum):
@@ -20,3 +21,18 @@ class Messages(Enum):
     error = 'You found an unintentional feature!'
     no_valid_parameters = 'No valid parameters found. No changes were made.'
     updated_valid_parameters = 'Updated the following valid parameters: '
+
+
+class SQLText(Enum):
+    test_pivot_original = sa.text("""
+    select * 
+    from wp_liftenergypitt.wp_postmeta 
+    where meta_key not like '\_%'
+    """)
+    post_types_and_columns = sa.text('''
+    select distinct pm.meta_key
+                  , p.post_type 
+    from wp_liftenergypitt.wp_postmeta as pm 
+        left join wp_liftenergypitt.wp_posts as p 
+            on p.ID = pm.post_id
+    ''')
