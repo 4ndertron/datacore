@@ -94,8 +94,6 @@ def establish_engines():
             sqlite_engine.name: sqlite_engine}
 
 
-
-
 def collect_meta_query_field_values(post_type):
     """
     This method will return the query text required to collect meta post data based off
@@ -154,19 +152,27 @@ def update_pivot_tables():
             type_key_pivot_dfs[post_type] = df_key.pivot(index='post_id', columns='meta_key', values='meta_value')
         if post_type not in type_value_pivot_dfs and df_val.empty is not True:
             type_value_pivot_dfs[post_type] = df_val.pivot(index='post_id', columns='meta_key', values='meta_value')
+    # todo: Parse out the groups within the post type to avoid exceeding the max number of columns in a table.
+    #   1. determine the group parents.
+    #       if field in index loop?
+    #       recursive method that pops and evaluates fields in a loop?
+    #   2. organize the parents into their own df.
+    #   3. Move children columns to their parent/group df.
+    #   4. Create a pivot table of the group parents instead of the post types.
 
-    print('Updating the meta_pivot_(keys/values)_type with the pivot data.')
-    for table_suf, df in type_key_pivot_dfs.items():
-        df.to_sql(f'meta_pivot_keys_{table_suf}',
-                  con=lwp.engine,
-                  schema='wp_pivot_data',
-                  if_exists='replace')
-    for table_suf, df in type_value_pivot_dfs.items():
-        df.to_sql(f'meta_pivot_values_{table_suf}',
-                  con=lwp.engine,
-                  schema='wp_pivot_data',
-                  if_exists='replace')
-    return [post_type_df, type_list, type_value_pivot_dfs, type_key_pivot_dfs]
+    # print('Updating the meta_pivot_(keys/values)_type with the pivot data.')
+    # for table_suf, df in type_key_pivot_dfs.items():
+    #     df.to_sql(f'meta_pivot_keys_{table_suf}',
+    #               con=lwp.engine,
+    #               schema='wp_pivot_data',
+    #               if_exists='replace')
+    # for table_suf, df in type_value_pivot_dfs.items():
+    #     df.to_sql(f'meta_pivot_values_{table_suf}',
+    #               con=lwp.engine,
+    #               schema='wp_pivot_data',
+    #               if_exists='replace')
+    # return [post_type_df, type_list, type_value_pivot_dfs, type_key_pivot_dfs]
+
 
 def melt_pivot_tables():
     print('Grabbing the list of pivot table names.')
@@ -202,9 +208,10 @@ def melt_pivot_tables():
                   schema='wp_liftenergypitt',
                   if_exists='append',
                   index=False)
-    return [table_names, post_types, pivot_dfs, melt_dfs, post_meta_backup]
+    return [table_names, pivot_dfs, melt_dfs, post_meta_backup]
 
 
 if __name__ == '__main__':
-    tests_pivot = update_pivot_tables()
-    tests_melt = melt_pivot_tables()
+    print('work in progress')
+    # tests_pivot = update_pivot_tables()
+    # tests_melt = melt_pivot_tables()
