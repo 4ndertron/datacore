@@ -5,6 +5,7 @@ from modules.project_enums import Engines
 from modules.project_enums import HandlerParams
 from modules.project_enums import Messages
 from modules.project_enums import SQLText
+from modules.project_enums import Regex
 
 env = os.environ
 hp = HandlerParams
@@ -95,6 +96,9 @@ def establish_engines():
 
 def generate_union_statement(columns, source):
     """
+
+    This function may not be needed depending on the results found in the melt_test() function
+
     This function is intended to handle the dynamic and tedious task of maintaining the union all
     sql statements used to import data into the word press engine's wp_postmeta table.
     :param columns: an iterable data type (array/tuple) containing all of the column names.
@@ -188,31 +192,27 @@ def collect_meta_query_field_keys(post_type):
     return raw_query_text % ('like \'\_%\'', post_type)
 
 
-def pivot_attempt():
-    # This is used by pivot_test()
+def melt_pivot_tables():
+    # todo: 1. grab the list of pivot table names
     engines = establish_engines()
-    wp = engines[Engines.local_wp_engine_name.value]
-    export_db = engines[Engines.sqlite_engine_name.value]
-    qt = SQLText.test_pivot_original.value
-    wpdf = pd.read_sql(qt, wp.engine, index_col='meta_id')
-    wp_pivot = wpdf.pivot(index='post_id', columns='meta_key', values='meta_value')
-    return {'original_df': wpdf, 'pivot_df': wp_pivot, 'export_db': export_db}
+    locwp = engines[Engines.local_wp_engine_name.value]
+    apt = SQLText.all_pivot_tables.value.text
+    pt_df = pd.read_sql(apt, locwp.engine)
+    table_names = [x[0] for x in pt_df.values.tolist()]
+    # Why did I need the post types?
+    post_types = [Regex.pivot_table_prefix.value.sub('', x) for x in table_names]
 
-
-def pivot_test():
-    # this uses pivot_attempt()
-    setup = pivot_attempt()
-    original = setup['original_df']
-    piv = setup['pivot_df']
-    export = setup['export_db']
-    src = 'wp_liftenergypitt.system_meta_pivot_values'
-    cols = ['tp_account', 'tp_validation_complete', 'tp_homeowner_ssn_hash']
-    union_statement = generate_union_statement(cols, src)
+    # todo 2. Extract the contents of each table.
+    pivot_dfs = [pd.read_sql(f'select * from wp_pivot_data.`{x}`', locwp.engine) for x in table_names]
+    # todo 3. Melt the extracted data
+    melt_dfs = [df.melt(id_vars='post_id', var_name='meta_key', value_name='meta_value') for df in pivot_dfs]
+    # todo 4. Update the postmeta table with the melted data.
+    return [table_names, post_types, pivot_dfs, melt_dfs]
 
 
 if __name__ == '__main__':
-    tests = update_pivot_tables()
-    ptdf = tests[0]
-    tl = tests[1]
-    pivot_values = tests[2]
-    pivot_keys = tests[3]
+    tests = melt_pivot_tables()
+    t1 = tests[0]
+    t2 = tests[1]
+    t3 = tests[2]
+    t4 = tests[3]

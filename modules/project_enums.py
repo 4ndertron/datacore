@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 from . import sa
 
@@ -51,3 +52,12 @@ class SQLText(Enum):
     , mpv.%s as meta_value
     from %s as mpv
     ''')
+    all_pivot_tables = sa.text('''
+    select table_name
+    from information_schema.tables
+    where table_schema = 'wp_pivot_data'
+    ''')
+
+
+class Regex(Enum):
+    pivot_table_prefix = re.compile(r'meta_pivot_keys_|meta_pivot_values_')
