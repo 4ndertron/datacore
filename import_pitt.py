@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-import sqlalchemy as sa
 from sqlalchemy import create_engine
 from modules.project_enums import Engines
 from modules.project_enums import HandlerParams
@@ -94,14 +93,103 @@ def establish_engines():
             sqlite_engine.name: sqlite_engine}
 
 
-def parse_types():
-    # get distinct post types
-    #     generate a query for each post type
-    #     return a df that needs to be pivoted.
-    return 0
+def generate_union_statement(columns, source):
+    """
+    This function is intended to handle the dynamic and tedious task of maintaining the union all
+    sql statements used to import data into the word press engine's wp_postmeta table.
+    :param columns: an iterable data type (array/tuple) containing all of the column names.
+    :param source: the explicit 'database.table' source text used in the queries WHERE clause.
+    :return: text type of the entire union statement query.
+    """
+    sql_raw_text = SQLText.union_part.value
+    if len(columns) >= 2:
+        union_parts = []
+        for column in columns:
+            if len(column) >= 3 and type(column) == 'str':
+                union_part_text = sql_raw_text.text % (column, column, source)
+                union_parts.append(union_part_text)
+            full_union_text = 'union all'.join(union_parts)
+            return full_union_text
+    else:
+        full_union_text = sql_raw_text.text % (columns[0], columns[0], source)
+        return full_union_text
+
+
+def update_pivot_tables():
+    # todo: 1. Collect all distinct post types
+    engines = establish_engines()
+    pitt = engines[Engines.pitt_engine_name.value]
+    lwp = engines[Engines.local_wp_engine_name.value]
+    ptqt = SQLText.distinct_post_types.value.text
+    post_type_df = pd.read_sql(ptqt, pitt.engine)
+    type_list = [x[0] for x in post_type_df.values.tolist()]
+
+    # todo: 2. Collect all columns for each post type
+    type_key_dfs = {}
+    type_value_dfs = {}
+    for post_type in type_list:
+        if post_type not in type_key_dfs:
+            type_key_dfs[post_type] = pd.read_sql(collect_meta_query_field_keys(post_type), pitt.engine)
+        if post_type not in type_value_dfs:
+            type_value_dfs[post_type] = pd.read_sql(collect_meta_query_field_values(post_type), pitt.engine)
+
+    # todo: 3. pivot the values for the post types and columns by post_id
+    type_key_pivot_dfs = {}
+    type_value_pivot_dfs = {}
+    for post_type in type_list:
+        df_key = type_key_dfs[post_type]
+        df_val = type_value_dfs[post_type]
+        if post_type not in type_key_pivot_dfs and df_key.empty is not True:
+            type_key_pivot_dfs[post_type] = df_key.pivot(index='post_id', columns='meta_key', values='meta_value')
+        if post_type not in type_value_pivot_dfs and df_val.empty is not True:
+            type_value_pivot_dfs[post_type] = df_val.pivot(index='post_id', columns='meta_key', values='meta_value')
+
+    # todo: 4. update the type_meta_pivot_values with the pivot
+    for table_suf, df in type_key_pivot_dfs.items():
+        df.to_sql(f'meta_pivot_keys_{table_suf}',
+                  con=lwp.engine,
+                  schema='wp_pivot_data',
+                  if_exists='replace')
+    for table_suf, df in type_value_pivot_dfs.items():
+        df.to_sql(f'meta_pivot_values_{table_suf}',
+                  con=lwp.engine,
+                  schema='wp_pivot_data',
+                  if_exists='replace')
+    return [post_type_df, type_list, type_value_pivot_dfs, type_key_pivot_dfs]
+
+
+def collect_meta_query_field_values(post_type):
+    """
+    This method will return the query text required to collect meta post data based off
+    of a post_type as a string.
+    This method is required because the sql wildcard character '%' was being picked up
+    by python's string interpolation as a format occurrence. This method will automatically
+    handle the wildcard character interactions with the query text.
+
+    :param post_type: string of post type contained in the wp posts table.
+    :return: query text.
+    """
+    raw_query_text = SQLText.post_type_meta_collection.value.text
+    return raw_query_text % ('not like \'\_%\'', post_type)
+
+
+def collect_meta_query_field_keys(post_type):
+    """
+    This method will return the query text required to collect meta post data based off
+    of a post_type as a string.
+    This method is required because the sql wildcard character '%' was being picked up
+    by python's string interpolation as a format occurrence. This method will automatically
+    handle the wildcard character interactions with the query text.
+
+    :param post_type: string of post type contained in the wp posts table.
+    :return: query text.
+    """
+    raw_query_text = SQLText.post_type_meta_collection.value.text
+    return raw_query_text % ('like \'\_%\'', post_type)
 
 
 def pivot_attempt():
+    # This is used by pivot_test()
     engines = establish_engines()
     wp = engines[Engines.local_wp_engine_name.value]
     export_db = engines[Engines.sqlite_engine_name.value]
@@ -111,13 +199,20 @@ def pivot_attempt():
     return {'original_df': wpdf, 'pivot_df': wp_pivot, 'export_db': export_db}
 
 
-if __name__ == '__main__':
+def pivot_test():
+    # this uses pivot_attempt()
     setup = pivot_attempt()
     original = setup['original_df']
     piv = setup['pivot_df']
     export = setup['export_db']
-    piv.to_sql(name='meta_pivot_values',
-               con=export.engine,
-               if_exists='replace',
-               # schema='wp_liftenergypitt',
-               index_label='post_id')
+    src = 'wp_liftenergypitt.system_meta_pivot_values'
+    cols = ['tp_account', 'tp_validation_complete', 'tp_homeowner_ssn_hash']
+    union_statement = generate_union_statement(cols, src)
+
+
+if __name__ == '__main__':
+    tests = update_pivot_tables()
+    ptdf = tests[0]
+    tl = tests[1]
+    pivot_values = tests[2]
+    pivot_keys = tests[3]

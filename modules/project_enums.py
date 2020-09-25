@@ -24,15 +24,30 @@ class Messages(Enum):
 
 
 class SQLText(Enum):
-    test_pivot_original = sa.text("""
-    select * 
-    from wp_liftenergypitt.wp_postmeta 
-    where meta_key not like '\_%'
-    """)
+    distinct_post_types = sa.text('''
+    select distinct p.post_type
+    from wp_liftenergypitt.wp_posts as p
+    ''')
+    post_type_meta_collection = sa.text(f'''
+    select pm.post_id
+         , pm.meta_key
+         , pm.meta_value
+    from wp_liftenergypitt.wp_postmeta as pm
+        left join wp_liftenergypitt.wp_posts as p
+            on p.ID = pm.post_id
+    where meta_key %s
+    and p.post_type = '%s'
+    ''')
     post_types_and_columns = sa.text('''
     select distinct pm.meta_key
                   , p.post_type 
     from wp_liftenergypitt.wp_postmeta as pm 
         left join wp_liftenergypitt.wp_posts as p 
             on p.ID = pm.post_id
+    ''')
+    union_part = sa.text('''
+    select mpv.post_id as post_id
+    , '%s' as meta_key
+    , mpv.%s as meta_value
+    from %s as mpv
     ''')
