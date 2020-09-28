@@ -104,6 +104,9 @@ def update_pivot_tables():
             type_key_pivot_dfs[post_type] = df_key.pivot(index='post_id', columns='meta_key', values='meta_value')
         if post_type not in type_value_pivot_dfs and df_val.empty is not True:
             type_value_pivot_dfs[post_type] = df_val.pivot(index='post_id', columns='meta_key', values='meta_value')
+
+    # todo: attempt to have wpengine whitelist the ipv4 address=67.161.213.7 instead of the two ipv6 addresses.
+
     # todo: Parse out the groups within the post type to avoid exceeding the max number of columns in a table.
     #   1. determine the group parents.
     #       if field in index loop?
