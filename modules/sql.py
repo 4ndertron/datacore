@@ -1,71 +1,56 @@
-from . import re
-from . import data_type_conversions
-import sqlite3 as sql
+import os
+from sqlalchemy import create_engine
+from modules.project_enums import Engines
+from modules.project_enums import HandlerParams
+from modules.project_enums import Messages
+
+env = os.environ
+hp = HandlerParams
 
 
-class Sql:
-    def __init__(self, database=None, console_output=False):
-        self.master_table_dat = None
-        self.console_output = console_output
-        self.db = database
-        self._set_con_and_cur()
-        self._close_con_and_cur()
+class SqliteHandler:
+    def __init__(self, **kwargs):
+        self.default = 'sqlite:///./data/foo.db'
+        self.name = Engines.sqlite_engine_name.value
+        self.engine = None
+        self._setup_engine()
 
-    def _close_con_and_cur(self):
-        self.cur.close()
-        self.conn.close()
+    def _setup_engine(self):
+        self.engine = create_engine(self.default)
 
-    def _set_con_and_cur(self):
-        self.conn = sql.connect(self.db)
-        self.cur = self.conn.cursor()
 
-    def run_query_text(self, query_text):
-        self._set_con_and_cur()
-        res = self.cur.execute(query_text)
-        dat = res.fetchall()
-        print(f'debug run query text before close\n{dat}')
-        self._close_con_and_cur()
-        print(f'debug run query text after close\n{dat}')
-        print(dat)
-        return dat
+class MysqlHandler:
+    def __init__(self, **kwargs):
+        self._host = kwargs[hp.host.value] if hp.host.value in kwargs else 'localhost'
+        self._port = kwargs[hp.port.value] if hp.port.value in kwargs else '3306'
+        self._user = kwargs[hp.user.value] if hp.user.value in kwargs else 'root'
+        self._pswd = kwargs[hp.pswd.value] if hp.pswd.value in kwargs else 'root'
+        self.name = kwargs[hp.name.value] if hp.name.value in kwargs else 'mysql'
+        self.valid_parameters = HandlerParams.valid_params.value
+        self.engine = None
+        self._setup_engine()
 
-    def create_table(self, *args, **kwargs):
-        columns = []
-        table_name = ''
-        if 'table_name' in kwargs and type(kwargs['table_name']) == str:
-            table_name = kwargs['table_name'].replace(' ', '_')
-        if 'columns' in kwargs and type(kwargs['columns']) == dict:
-            for k, v in kwargs['columns'].items():
-                columns.append(f'{k} {data_type_conversions[v.__name__]}')
-        column_text = ','.join(columns)
-        new_table_text = f'create table {table_name} ({column_text})'
-        print(f'debug new_table_text: "{new_table_text}"')
-        self.run_query_text(new_table_text)
+    def _setup_engine(self):
+        url = f'mysql://{self._user}:{self._pswd}@{self._host}:{self._port}'
+        self.engine = create_engine(url)
 
-    def populate_table(self, *args, **kwargs):
-        inval = data_type_conversions
-        value_markers = []
-        table_name = ''  # todo: validate that the table name exists in the database.
-        for arg in args:
-            print(f'debug arg in args: {arg}')
-            if type(arg) == list:
-                value_markers = ['?' for x in range(len(arg[0])) if type(arg[0]) == list]
-        value_marker_text = ','.join(value_markers)
-        print(f'debug value_marker_text: "{value_marker_text}"')
-        insert_into_text = f'insert into {table_name} values ({value_markers})'
-        print(f'debug insert_into_text: "{insert_into_text}"')
-        # todo: find a way to use the cur.executemany(x, y) method instead of cur.execute(z)
-        # self.run_query_text(insert_into_text)
+    def update_connection_parameters(self, **kwargs):
+        self._host = kwargs[hp.host.value] if hp.host.value else self._host
+        self._port = kwargs[hp.port.value] if hp.port.value else self._port
+        self._user = kwargs[hp.user.value] if hp.user.value else self._user
+        self._pswd = kwargs[hp.pswd.value] if hp.pswd.value else self._pswd
+        self.name = kwargs[hp.name.value] if hp.name.value in kwargs else self.name
+        returns = []
+        for k, v in kwargs:
+            if k in self.valid_parameters:
+                returns.append(k)
+        if len(returns) == 0:
+            return Messages.no_valid_parameters.value
+        else:
+            self._setup_engine()
+            return f'{Messages.updated_valid_parameters.value}{",".join(returns)}'
 
-    def run_query_file(self, file_path):
-        with open(file_path) as f:
-            res = self.run_query_text(f.read())
-            # print(f'debugging res var in run_query_file method\n{res}')
-            return res
-
-    def get_existing_tables(self):
-        query_text = '''select * from main.sqlite_master'''
-        self._set_con_and_cur()
-        res = self.cur.execute(query_text)
-        self.master_table_dat = res.fetchall()
-        self._close_con_and_cur()
+    def get_database_outline(self):
+        data = {}
+        if self.engine is not None:
+            return 'success'
