@@ -26,7 +26,7 @@ def establish_engines():
         name=pitt_name,
     )
 
-    local_wp_host = '10.1.10.38'
+    local_wp_host = '10.0.0.87'
     local_wp_port = '23306'
     local_wp_user = 'wordpress'
     local_wp_pswd = 'wordpress'
@@ -166,7 +166,89 @@ def melt_pivot_tables():
     return [table_names, pivot_dfs, melt_dfs, post_meta_backup]
 
 
+def sift_metadata_to_groups(name_list=None, group_dict=None):
+    if group_dict is None:
+        group_dict = {}
+    if name_list is None:
+        name_list = [
+            # A table would be the name of the entity/group, and the columns of the table
+            # would be the fields of the group.
+            #
+            # If an item occurs only once in the set, then it is a field.
+            # If an item occurs more than once in the set, then it is a group/table.
+            # The parent group of the field is the group, with the largest length of string,
+            # that matches part of the field name.
+            # The matching field/group combinations should be removed from the list, and organized into
+            # a dictionary.
+            #
+            # The recursive function would be passed a list of strings and dictionary of data,
+            # determine which indexes in the list are fields and groups,
+            # remove the field/group pairs from the list into the dictionary,
+            # then pass the new list & dictionary combo back to the function.
+            # The conditional statement would be if the list of strings is empty.
+            'tp_a',  # group
+            'tp_a_field1',  # field
+            'tp_a_group1',  # group
+            'tp_a_group1_field1',  # field
+            'tp_a_group1_field2_group',  # group
+            'tp_a_group1_field2_group_field0',  # field
+            'tp_a_group1_field2_group_field1',  # field
+            'tp_a_group1_field3',  # field
+            'tp_a_group2',  # group
+            'tp_a_group2_field1',  # field
+            'tp_c',  # group
+            'tp_c_group1',  # field
+        ]
+        example_output = {
+            'tp_a': ['tp_a_field1'],
+            'tp_a_group1': ['tp_a_group1_field1', 'tp_a_group1_field3'],
+            'tp_a_group1_field2_group': ['tp_a_group1_field2_group_field1', 'tp_a_group1_field2_group_field2'],
+            'tp_a_group2': ['tp_a_group2_field1'],
+            'tp_c': ['tp_c_group1'],
+        }
+    if len(name_list) == 0:  # control statement
+        return group_dict
+    else:
+        print('Sifting the name list provided.')
+        labels = {}
+
+        print('Determining which indexes in the name list is a field and which is a group.')
+        for i in range(len(name_list)):
+            ict = 0
+            for j in range(len(name_list)):
+                if name_list[i] in name_list[j]:
+                    ict += 1
+            if ict > 1:
+                labels[name_list[i]] = 'g'
+            else:
+                labels[name_list[i]] = 'f'
+        groups = {key: value for (key, value) in labels.items() if value == 'g'}
+        fields = {key: value for (key, value) in labels.items() if value == 'f'}
+
+        print('Matching the parent group to each field.')
+        field_map = {}
+        for group, gct in groups.items():
+            for field, parent in fields.items():
+                if group in field and len(group) > len(parent):
+                    field_map[field] = group
+
+        print('Generating a dictionary of group names and a list of their columns.')
+        for field, parent in field_map.items():
+            if parent not in group_dict:
+                group_dict[parent] = [field]
+            else:
+                group_dict[parent].append(field)
+        # todo: parse out just the group names from the group_dict to avoid table names > 64 characters long.
+        print('Sift complete, returning the list\'s groups and their columns.')
+        return group_dict
+
+
 if __name__ == '__main__':
     print('work in progress')
+    engines = establish_engines()
+    pl = engines[Engines.local_wp_engine_name.value]
+    pitt = engines[Engines.pitt_engine_name.value]
+    lite = engines[Engines.sqlite_engine_name.value]
+    gf_test = sift_metadata_to_groups()
     # tests_pivot = update_pivot_tables()
     # tests_melt = melt_pivot_tables()
