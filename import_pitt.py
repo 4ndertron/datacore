@@ -95,6 +95,34 @@ def update_pivot_tables():
         if post_type not in type_value_dfs:
             type_value_dfs[post_type] = pd.read_sql(collect_meta_query_field_values(post_type), lwp.engine)
 
+    type_orgs = {}
+    for x in [type_key_dfs, type_value_dfs]:
+        logging.debug(f'iterating through {x.keys()}')
+        for pt, pt_df in x.items():
+            logging.debug(f'evaluating {pt}\n\tpt_df: {pt_df.head(1)}')
+            if pt not in type_orgs:
+                tmp_arg = pt_df['meta_key'].values.tolist()
+                logging.debug(f'passing tmp_arg to sift_metadata_to_groups method\n\ttmp_arg: {tmp_arg}')
+                pt_df_org = sift_metadata_to_groups(tmp_arg)
+                logging.debug(f'evaluating the return of the sifting method\n\t{pt_df_org}')
+                type_orgs[pt] = pt_df_org
+            else:
+                tmp_arg = pt_df['meta_key'].values.tolist()
+                logging.debug(f'passing tmp_arg to sift_metadata_to_groups method\n\ttmp_arg: {tmp_arg}')
+                pt_df_org = sift_metadata_to_groups(tmp_arg)
+                logging.debug(f'evaluating the return of the sifting method\n\t{pt_df_org}')
+                type_orgs[pt].update(pt_df_org)
+
+    type_group_table_org = {}
+    for pt, ptg in type_orgs.items():
+        for group, cols in ptg.items():
+            table_columns = cols
+            if group == 'f':
+                table_name = pt
+            else:
+                table_name = f'{pt}_{group}'
+            type_group_table_org[table_name] = table_columns
+
     logging.info('Pivoting the values for the post types and columns by post_id')
     type_key_pivot_dfs = {}
     type_value_pivot_dfs = {}
@@ -106,11 +134,7 @@ def update_pivot_tables():
         if post_type not in type_value_pivot_dfs and df_val.empty is not True:
             type_value_pivot_dfs[post_type] = df_val.pivot(index='post_id', columns='meta_key', values='meta_value')
 
-    # todo: Determine the group parents.
-
-    # todo: Organize the parents into their own df.
-    # todo: Move children columns to their parent/group df.
-    # todo: Create a pivot table of the group parents instead of the post types.
+    logging.debug('Attempting to parse out the pivoted dataframes into their own respective type_group dataframes')
 
     # logging.info('Updating the meta_pivot_(keys/values)_type with the pivot data.')
     # for table_suf, df in type_key_pivot_dfs.items():
@@ -123,7 +147,14 @@ def update_pivot_tables():
     #               con=lwp.engine,
     #               schema='wp_pivot_data',
     #               if_exists='replace')
-    return [post_type_df, type_list, type_key_dfs, type_value_dfs, type_value_pivot_dfs, type_key_pivot_dfs]
+    return [post_type_df,
+            type_list,
+            type_key_dfs,
+            type_value_dfs,
+            type_value_pivot_dfs,
+            type_key_pivot_dfs,
+            type_orgs,
+            type_group_table_org]
 
 
 def melt_pivot_tables():
@@ -206,10 +237,10 @@ def sift_metadata_to_groups(name_list=None, group_dict=None):
     if len(name_list) == 0:  # control statement
         return group_dict
     else:  # primary method
-        logging.info('Sifting the name list provided.')
+        logging.debug('Sifting the name list provided.')
         labels = {}
 
-        logging.info('Determining which indexes in the name list is a field and which is a group.')
+        logging.debug('Determining which indexes in the name list is a field and which is a group.')
         for i in range(len(name_list)):
             ict = 0
             for j in range(len(name_list)):
@@ -222,21 +253,21 @@ def sift_metadata_to_groups(name_list=None, group_dict=None):
         groups = {key: value for (key, value) in labels.items() if value == 'g'}
         fields = {key: value for (key, value) in labels.items() if value == 'f'}
 
-        logging.info('Matching the parent group to each field.')
+        logging.debug('Matching the parent group to each field.')
         for group, glab in groups.items():
             for field, flab in fields.items():
                 if group in field and len(group) > len(flab):
                     fields[field] = group
 
-        logging.info('Generating a dictionary of group names and a list of their columns.')
+        logging.debug('Generating a dictionary of group names and a list of their columns.')
         for field, parent in fields.items():
             if parent not in group_dict:
                 group_dict[parent] = [field]
             else:
                 group_dict[parent].append(field)
         # todo: parse out just the group names from the group_dict to avoid table names > 64 characters long.
-        logging.info('Sift complete, returning the list\'s groups and their columns.')
-        return [labels, groups, fields, group_dict]
+        logging.debug('Sift complete, returning the list\'s groups and their columns.')
+        return group_dict
 
 
 if __name__ == '__main__':
@@ -253,10 +284,15 @@ if __name__ == '__main__':
     tvdfs = tests[3]
     tvpdfs = tests[4]
     tkpdfs = tests[5]
+    tos = tests[6]
+    tgto = tests[7]
 
     sys = tkdfs['system']
     sys_names = sys['meta_key'].values.tolist()
     sys_org_test = sift_metadata_to_groups(sys_names)
-    # [post_type_df, type_list, type_key_dfs, type_value_dfs, type_value_pivot_dfs, type_key_pivot_dfs]
-    # tests_pivot = update_pivot_tables()
-    # tests_melt = melt_pivot_tables()
+    sysp = tkpdfs['system']
+
+    sys_homeowner_df = sysp[sys_org_test['_tp_homeowner']]
+    sys_homeowner_df['_tp_homeowner'] = sysp[['_tp_homeowner']]
+
+    # success! tkpdfs['system'][sys_org_test[3]['_tp_homeowner']]
