@@ -1,11 +1,8 @@
-import os
+from modules import env
 from sqlalchemy import create_engine
 from modules.project_enums import Engines
-from modules.project_enums import HandlerParams
+from modules.project_enums import HandlerParams as hp
 from modules.project_enums import Messages
-
-env = os.environ
-hp = HandlerParams
 
 
 class SqliteHandler:
@@ -26,7 +23,7 @@ class MysqlHandler:
         self._user = kwargs[hp.user.value] if hp.user.value in kwargs else 'root'
         self._pswd = kwargs[hp.pswd.value] if hp.pswd.value in kwargs else 'root'
         self.name = kwargs[hp.name.value] if hp.name.value in kwargs else 'mysql'
-        self.valid_parameters = HandlerParams.valid_params.value
+        self.valid_parameters = hp.valid_params.value
         self.engine = None
         self._setup_engine()
 

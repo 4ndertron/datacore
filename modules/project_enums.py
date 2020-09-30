@@ -29,7 +29,7 @@ class SQLText(Enum):
     select distinct p.post_type
     from wp_liftenergypitt.wp_posts as p
     ''')
-    post_type_meta_collection = sa.text(f'''
+    post_type_meta_collection_split = sa.text(f'''
     select pm.post_id
          , pm.meta_key
          , pm.meta_value
@@ -38,6 +38,15 @@ class SQLText(Enum):
             on p.ID = pm.post_id
     where meta_key %s
     and p.post_type = '%s'
+    ''')
+    post_type_meta_collection_join = sa.text(f'''
+    select pm.post_id
+         , pm.meta_key
+         , pm.meta_value
+    from wp_liftenergypitt.wp_postmeta as pm
+        left join wp_liftenergypitt.wp_posts as p
+            on p.ID = pm.post_id
+    where p.post_type = '%s'
     ''')
     post_types_and_columns = sa.text('''
     select distinct pm.meta_key
