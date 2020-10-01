@@ -68,5 +68,10 @@ class SQLText(Enum):
     ''')
 
 
+class RegexText(Enum):
+    derive_post_from_table_name_rt = r'^[^_+]*'
+
+
 class Regex(Enum):
-    pivot_table_prefix = re.compile(r'meta_pivot_keys_|meta_pivot_values_')
+    re_mod = re
+    derive_post_from_table_name = re.compile(RegexText.derive_post_from_table_name_rt.value)

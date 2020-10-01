@@ -44,6 +44,12 @@ def establish_engines():
             sqlite_engine.name: sqlite_engine}
 
 
+engines = establish_engines()
+pitt = engines[Engines.pitt_engine_name.value]
+lwp = engines[Engines.pitt_engine_name.value]
+sqlite = engines[Engines.sqlite_engine_name.value]
+
+
 def collect_meta_query_field_values(post_type):
     """
     This method will return the query text required to collect meta post data based off
@@ -74,11 +80,30 @@ def collect_meta_query_field_keys(post_type):
     return raw_query_text % ('like \'\_%\'', post_type)
 
 
+def backup_metadata():
+    # todo: Make a long table of backup metadata that includes:
+    #   event id,
+    #   datetime of event,
+    #   engine_source,
+    #   backup_number for source
+    logging.info('Backing up the current state of the postmeta table.')
+    post_meta_backup = pd.read_sql('select * from wp_liftenergypitt.wp_postmeta', locwp.engine).set_index('meta_id')
+    backups = pd.read_sql('select * from main.postmeta_backups', sqlite.engine)
+    post_meta_backup.to_sql(f'postmeta_backup_{backups["backup_count"][0]}',
+                            con=sqlite.engine,
+                            if_exists='replace')
+    backups["backup_count"][0] += 1
+    backups.to_sql('postmeta_backups', con=sqlite.engine, if_exists='replace', index=False)
+    return 'safe'
+
+
 def update_pivot_tables():
+    """
+    Just... It works
+    This function will have it's parts parsed into a single line of functionality that can be utilized
+    by parallel processing.
+    """
     logging.info('Collecting all distinct post types.')
-    engines = establish_engines()
-    pitt = engines[Engines.pitt_engine_name.value]
-    lwp = engines[Engines.local_wp_engine_name.value]
     ptqt = SQLText.distinct_post_types.value.text
     ptmcqt = SQLText.post_type_meta_collection_join.value.text
     post_type_df = pd.read_sql(ptqt, lwp.engine)
@@ -95,6 +120,7 @@ def update_pivot_tables():
         if post_type not in type_value_dfs:
             type_value_dfs[post_type] = pd.read_sql(collect_meta_query_field_values(post_type), lwp.engine)
 
+    logging.info('Organizing all the columns into groups and fields for each post type.')
     type_orgs = {}
     for x in [type_key_dfs, type_value_dfs]:
         logging.debug(f'iterating through {x.keys()}')
@@ -113,16 +139,16 @@ def update_pivot_tables():
                 logging.debug(f'evaluating the return of the sifting method\n\t{pt_df_org}')
                 type_orgs[pt].update(pt_df_org)
 
-    # This dictionary represents the table names and column names that will be represented in the pivot tables schema.
+    logging.info('Melting all the group/field combos with each post type into a type_group_table:columns dictionary')
     type_group_table_org = {}
     for pt, ptg in type_orgs.items():
         for group, cols in ptg.items():
-            table_columns = cols
+            cols.append(group) if group != 'f' else None
             if group == 'f':
                 table_name = pt
             else:
                 table_name = f'{pt}_{group}'
-            type_group_table_org[table_name] = table_columns
+            type_group_table_org[table_name] = cols
 
     logging.info('Pivoting the values for the post types and columns by post_id')
     type_key_pivot_dfs = {}
@@ -134,71 +160,68 @@ def update_pivot_tables():
             type_key_pivot_dfs[post_type] = df_key.pivot(index='post_id', columns='meta_key', values='meta_value')
         if post_type not in type_value_pivot_dfs and df_val.empty is not True:
             type_value_pivot_dfs[post_type] = df_val.pivot(index='post_id', columns='meta_key', values='meta_value')
+
+    logging.info('Merging the key and value dataframes together and placing them in a dictionary.')
     type_pivot_dfs = {}
-    # for tl in type_list:
-    # type_pivot_dfs = pd.concat([type_key_pivot_dfs[tl], type_value_pivot_dfs[tl]], axis=1)
+    for tl in type_list:
+        df_list = [x[tl] for x in [type_key_pivot_dfs, type_value_pivot_dfs] if tl in x]
+        logging.debug(f'len(df_list):\n\t{len(df_list)}')
+        if len(df_list) > 0:
+            type_pivot_dfs[tl] = pd.concat(df_list, axis=1)
 
-    logging.debug('Attempting to parse out the pivoted dataframes into their own respective type_group dataframes')
-
+    logging.info('Parsing the merged dataframes into the type_group_table:columns format')
     pivot_tables = {}
+    for table, columns in type_group_table_org.items():
+        post_name = Regex.derive_post_from_table_name.value.search(table)
+        logging.info(f'post_name: {post_name.group()} | table: {table} | len(columns): {len(columns)}')
+        pivot_tables[table] = type_pivot_dfs[post_name.group()].loc[:, columns]
 
-    # logging.info('Updating the meta_pivot_(keys/values)_type with the pivot data.')
-    # for table_suf, df in type_key_pivot_dfs.items():
-    #     df.to_sql(f'meta_pivot_keys_{table_suf}',
-    #               con=lwp.engine,
-    #               schema='wp_pivot_data',
-    #               if_exists='replace')
-    # for table_suf, df in type_value_pivot_dfs.items():
-    #     df.to_sql(f'meta_pivot_values_{table_suf}',
-    #               con=lwp.engine,
-    #               schema='wp_pivot_data',
-    #               if_exists='replace')
-    return [post_type_df,
-            type_list,
-            type_key_dfs,
-            type_value_dfs,
-            type_value_pivot_dfs,
-            type_key_pivot_dfs,
-            type_orgs,
-            type_group_table_org,
-            type_pivot_dfs]
+    logging.info('Pushing the type_group_table:columns dataframes into the pivot_tables schema.')
+    for table_name, table_data in pivot_tables.items():
+        table_data.to_sql(table_name,
+                          con=lwp.engine,
+                          schema='pivot_tables',
+                          if_exists='replace')
+
+    return [  # No return value is required, however, these variables are returned for exploring the data in a console.
+        post_type_df,
+        type_list,
+        type_key_dfs,
+        type_value_dfs,
+        type_value_pivot_dfs,
+        type_key_pivot_dfs,
+        type_orgs,
+        type_group_table_org,
+        type_pivot_dfs,
+        pivot_tables
+    ]
 
 
 def melt_pivot_tables():
+    # todo: Scrape through this function and make sure it's compatable with the changes in data that the updated
+    #   pivot function does.
     logging.info('Grabbing the list of pivot table names.')
-    engines = establish_engines()
-    locwp = engines[Engines.local_wp_engine_name.value]
-    sqlite = engines[Engines.sqlite_engine_name.value]
     apt = SQLText.all_pivot_tables.value.text
-    pt_df = pd.read_sql(apt, locwp.engine)
+    pt_df = pd.read_sql(apt, lwp.engine)
     table_names = [x[0] for x in pt_df.values.tolist()]
-    # Why did I need the post types?
-    post_types = [Regex.pivot_table_prefix.value.sub('', x) for x in table_names]
 
     logging.info('Extracting the contents of each pivot table.')
-    pivot_dfs = [pd.read_sql(f'select * from wp_pivot_data.`{x}`', locwp.engine) for x in table_names]
+    pivot_dfs = [pd.read_sql(f'select * from pivot_tables.`{x}`', lwp.engine) for x in table_names]
 
     logging.info('Metling the extracted data.')
     melt_dfs = [df.melt(id_vars='post_id', var_name='meta_key', value_name='meta_value') for df in pivot_dfs]
 
-    logging.info('Backing up the current state of the postmeta table.')
-    post_meta_backup = pd.read_sql('select * from wp_liftenergypitt.wp_postmeta', locwp.engine).set_index('meta_id')
-    backups = pd.read_sql('select * from main.postmeta_backups', sqlite.engine)
-    post_meta_backup.to_sql(f'postmeta_backup_{backups["backup_count"][0]}',
-                            con=sqlite.engine,
-                            if_exists='replace')
-    backups["backup_count"][0] += 1
-    backups.to_sql('postmeta_backups', con=sqlite.engine, if_exists='replace', index=False)
+    bu_status = backup_metadata()
 
-    # todo 4. Update the postmeta table with the melted data.
-    logging.info('Updating the postmeta table with the melted data.')
-    for df in melt_dfs:
-        df.to_sql('wp_postmeta',
-                  con=locwp.engine,
-                  schema='wp_liftenergypitt',
-                  if_exists='append',
-                  index=False)
-    return [table_names, pivot_dfs, melt_dfs, post_meta_backup]
+    if bu_status == 'safe':
+        logging.info('Updating the postmeta table with the melted data.')
+        for df in melt_dfs:
+            df.to_sql('wp_postmeta',
+                      con=lwp.engine,
+                      schema='wp_liftenergypitt',
+                      if_exists='append',
+                      index=False)
+    return [table_names, pivot_dfs, melt_dfs]
 
 
 def sift_metadata_to_groups(name_list=None, group_dict=None):
@@ -286,7 +309,7 @@ if __name__ == '__main__':
 
     tests = update_pivot_tables()
     ptdf = tests[0]
-    tl = tests[1]
+    tlst = tests[1]
     tkdfs = tests[2]
     tvdfs = tests[3]
     tvpdfs = tests[4]
@@ -294,14 +317,4 @@ if __name__ == '__main__':
     tos = tests[6]
     tgto = tests[7]
     tpd = tests[8]
-
-    sys = tkdfs['system']
-    sys_names = sys['meta_key'].values.tolist()
-    sys_org_test = sift_metadata_to_groups(sys_names)
-    sysp = tkpdfs['system']
-    # to avoid info debugging with every run and speed up execution time, consult the following link:
-    # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
-    sys_homeowner_df = sysp.loc[:, sys_org_test['_tp_homeowner']]
-    sys_homeowner_df['_tp_homeowner'] = sysp.loc[:, '_tp_homeowner']
-
-    # success! tkpdfs['system'][sys_org_test[3]['_tp_homeowner']]
+    pivot_tables_dict = tests[9]
