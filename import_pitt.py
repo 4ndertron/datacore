@@ -113,6 +113,7 @@ def update_pivot_tables():
                 logging.debug(f'evaluating the return of the sifting method\n\t{pt_df_org}')
                 type_orgs[pt].update(pt_df_org)
 
+    # This dictionary represents the table names and column names that will be represented in the pivot tables schema.
     type_group_table_org = {}
     for pt, ptg in type_orgs.items():
         for group, cols in ptg.items():
@@ -133,8 +134,13 @@ def update_pivot_tables():
             type_key_pivot_dfs[post_type] = df_key.pivot(index='post_id', columns='meta_key', values='meta_value')
         if post_type not in type_value_pivot_dfs and df_val.empty is not True:
             type_value_pivot_dfs[post_type] = df_val.pivot(index='post_id', columns='meta_key', values='meta_value')
+    type_pivot_dfs = {}
+    # for tl in type_list:
+    # type_pivot_dfs = pd.concat([type_key_pivot_dfs[tl], type_value_pivot_dfs[tl]], axis=1)
 
     logging.debug('Attempting to parse out the pivoted dataframes into their own respective type_group dataframes')
+
+    pivot_tables = {}
 
     # logging.info('Updating the meta_pivot_(keys/values)_type with the pivot data.')
     # for table_suf, df in type_key_pivot_dfs.items():
@@ -154,7 +160,8 @@ def update_pivot_tables():
             type_value_pivot_dfs,
             type_key_pivot_dfs,
             type_orgs,
-            type_group_table_org]
+            type_group_table_org,
+            type_pivot_dfs]
 
 
 def melt_pivot_tables():
@@ -286,13 +293,15 @@ if __name__ == '__main__':
     tkpdfs = tests[5]
     tos = tests[6]
     tgto = tests[7]
+    tpd = tests[8]
 
     sys = tkdfs['system']
     sys_names = sys['meta_key'].values.tolist()
     sys_org_test = sift_metadata_to_groups(sys_names)
     sysp = tkpdfs['system']
-
-    sys_homeowner_df = sysp[sys_org_test['_tp_homeowner']]
-    sys_homeowner_df['_tp_homeowner'] = sysp[['_tp_homeowner']]
+    # to avoid info debugging with every run and speed up execution time, consult the following link:
+    # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+    sys_homeowner_df = sysp.loc[:, sys_org_test['_tp_homeowner']]
+    sys_homeowner_df['_tp_homeowner'] = sysp.loc[:, '_tp_homeowner']
 
     # success! tkpdfs['system'][sys_org_test[3]['_tp_homeowner']]
