@@ -23,13 +23,18 @@ class MysqlHandler:
         self._user = kwargs[hp.user.value] if hp.user.value in kwargs else 'root'
         self._pswd = kwargs[hp.pswd.value] if hp.pswd.value in kwargs else 'root'
         self.name = kwargs[hp.name.value] if hp.name.value in kwargs else 'mysql'
+        self._dbapi = '+mysqlconnector' if 'wpengine' in self._host else ''
         self.valid_parameters = hp.valid_params.value
         self.engine = None
         self._setup_engine()
 
     def _setup_engine(self):
-        url = f'mysql://{self._user}:{self._pswd}@{self._host}:{self._port}'
-        self.engine = create_engine(url)
+        conn_args = {
+            'auth_plugin': 'mysql_native_password',
+            # 'ssl_cert': env['thepitt_db_ca_path'] if 'pitt' in self._host else None
+        }
+        url = f'mysql{self._dbapi}://{self._user}:{self._pswd}@{self._host}:{self._port}'
+        self.engine = create_engine(url, connect_args=conn_args)
 
     def update_connection_parameters(self, **kwargs):
         self._host = kwargs[hp.host.value] if hp.host.value else self._host

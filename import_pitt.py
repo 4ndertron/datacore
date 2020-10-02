@@ -44,12 +44,6 @@ def establish_engines():
             sqlite_engine.name: sqlite_engine}
 
 
-engines = establish_engines()
-pitt = engines[Engines.pitt_engine_name.value]
-lwp = engines[Engines.pitt_engine_name.value]
-sqlite = engines[Engines.sqlite_engine_name.value]
-
-
 def collect_meta_query_field_values(post_type):
     """
     This method will return the query text required to collect meta post data based off
@@ -80,15 +74,16 @@ def collect_meta_query_field_keys(post_type):
     return raw_query_text % ('like \'\_%\'', post_type)
 
 
-def backup_metadata():
+def backup_metadata(source_engine_to_backup, backup_destination_engine):
     # todo: Make a long table of backup metadata that includes:
     #   event id,
     #   datetime of event,
     #   engine_source,
     #   backup_number for source
     logging.info('Backing up the current state of the postmeta table.')
-    post_meta_backup = pd.read_sql('select * from wp_liftenergypitt.wp_postmeta', locwp.engine).set_index('meta_id')
-    backups = pd.read_sql('select * from main.postmeta_backups', sqlite.engine)
+    post_meta_backup = pd.read_sql('select * from wp_liftenergypitt.wp_postmeta',  # The query isn't universal
+                                   source_engine_to_backup).set_index('meta_id')
+    backups = pd.read_sql('select * from main.postmeta_backups', backup_destination_engine)
     post_meta_backup.to_sql(f'postmeta_backup_{backups["backup_count"][0]}',
                             con=sqlite.engine,
                             if_exists='replace')
@@ -97,7 +92,7 @@ def backup_metadata():
     return 'safe'
 
 
-def update_pivot_tables():
+def update_pivot_tables(source_db_engine, destination_db_engine):
     """
     Just... It works
     This function will have it's parts parsed into a single line of functionality that can be utilized
@@ -106,7 +101,7 @@ def update_pivot_tables():
     logging.info('Collecting all distinct post types.')
     ptqt = SQLText.distinct_post_types.value.text
     ptmcqt = SQLText.post_type_meta_collection_join.value.text
-    post_type_df = pd.read_sql(ptqt, lwp.engine)
+    post_type_df = pd.read_sql(ptqt, source_db_engine)
     type_list = [x[0] for x in post_type_df.values.tolist()]
 
     logging.info('Collecting all the columns for each post type.')
@@ -114,34 +109,34 @@ def update_pivot_tables():
     type_key_dfs = {}
     type_value_dfs = {}
     for post_type in type_list:
-        type_dfs[post_type] = pd.read_sql(ptmcqt % post_type, lwp.engine)
+        type_dfs[post_type] = pd.read_sql(ptmcqt % post_type, source_db_engine)
         if post_type not in type_key_dfs:
-            type_key_dfs[post_type] = pd.read_sql(collect_meta_query_field_keys(post_type), lwp.engine)
+            type_key_dfs[post_type] = pd.read_sql(collect_meta_query_field_keys(post_type), source_db_engine)
         if post_type not in type_value_dfs:
-            type_value_dfs[post_type] = pd.read_sql(collect_meta_query_field_values(post_type), lwp.engine)
+            type_value_dfs[post_type] = pd.read_sql(collect_meta_query_field_values(post_type), source_db_engine)
 
     logging.info('Organizing all the columns into groups and fields for each post type.')
-    type_orgs = {}
+    type_organizations = {}
     for x in [type_key_dfs, type_value_dfs]:
         logging.debug(f'iterating through {x.keys()}')
         for pt, pt_df in x.items():
             logging.debug(f'evaluating {pt}\n\tpt_df: {pt_df.head(1)}')
-            if pt not in type_orgs:
+            if pt not in type_organizations:
                 tmp_arg = pt_df['meta_key'].values.tolist()
                 logging.debug(f'passing tmp_arg to sift_metadata_to_groups method\n\ttmp_arg: {tmp_arg}')
                 pt_df_org = sift_metadata_to_groups(tmp_arg)
                 logging.debug(f'evaluating the return of the sifting method\n\t{pt_df_org}')
-                type_orgs[pt] = pt_df_org
+                type_organizations[pt] = pt_df_org
             else:
                 tmp_arg = pt_df['meta_key'].values.tolist()
                 logging.debug(f'passing tmp_arg to sift_metadata_to_groups method\n\ttmp_arg: {tmp_arg}')
                 pt_df_org = sift_metadata_to_groups(tmp_arg)
                 logging.debug(f'evaluating the return of the sifting method\n\t{pt_df_org}')
-                type_orgs[pt].update(pt_df_org)
+                type_organizations[pt].update(pt_df_org)
 
     logging.info('Melting all the group/field combos with each post type into a type_group_table:columns dictionary')
     type_group_table_org = {}
-    for pt, ptg in type_orgs.items():
+    for pt, ptg in type_organizations.items():
         for group, cols in ptg.items():
             cols.append(group) if group != 'f' else None
             if group == 'f':
@@ -178,9 +173,10 @@ def update_pivot_tables():
 
     logging.info('Pushing the type_group_table:columns dataframes into the pivot_tables schema.')
     for table_name, table_data in pivot_tables.items():
+        logging.debug(f'dry run{table_name},\n\tcon={destination_db_engine}')
         table_data.to_sql(table_name,
-                          con=lwp.engine,
-                          schema='pivot_tables',
+                          con=destination_db_engine,
+                          schema='postmeta_pivot_tables',
                           if_exists='replace')
 
     return [  # No return value is required, however, these variables are returned for exploring the data in a console.
@@ -190,34 +186,35 @@ def update_pivot_tables():
         type_value_dfs,
         type_value_pivot_dfs,
         type_key_pivot_dfs,
-        type_orgs,
+        type_organizations,
         type_group_table_org,
         type_pivot_dfs,
         pivot_tables
     ]
 
 
-def melt_pivot_tables():
-    # todo: Scrape through this function and make sure it's compatable with the changes in data that the updated
+def melt_pivot_tables(source_db_engine, destination_db_engine, backup_destination_engine):
+    # todo: Scrape through this function and make sure it's compatible with the changes in data that the updated
     #   pivot function does.
     logging.info('Grabbing the list of pivot table names.')
     apt = SQLText.all_pivot_tables.value.text
-    pt_df = pd.read_sql(apt, lwp.engine)
+    pt_df = pd.read_sql(apt, source_db_engine)
     table_names = [x[0] for x in pt_df.values.tolist()]
 
     logging.info('Extracting the contents of each pivot table.')
-    pivot_dfs = [pd.read_sql(f'select * from pivot_tables.`{x}`', lwp.engine) for x in table_names]
+    pivot_dfs = [pd.read_sql(f'select * from pivot_tables.`{x}`', source_db_engine) for x in table_names]
 
     logging.info('Metling the extracted data.')
     melt_dfs = [df.melt(id_vars='post_id', var_name='meta_key', value_name='meta_value') for df in pivot_dfs]
 
-    bu_status = backup_metadata()
+    bu_status = backup_metadata(source_engine_to_backup=destination_db_engine,
+                                backup_destination_engine=backup_destination_engine)
 
     if bu_status == 'safe':
         logging.info('Updating the postmeta table with the melted data.')
         for df in melt_dfs:
             df.to_sql('wp_postmeta',
-                      con=lwp.engine,
+                      con=destination_db_engine,
                       schema='wp_liftenergypitt',
                       if_exists='append',
                       index=False)
@@ -303,11 +300,11 @@ def sift_metadata_to_groups(name_list=None, group_dict=None):
 if __name__ == '__main__':
     logging.debug('Work in Progress')
     engines = establish_engines()
-    pl = engines[Engines.local_wp_engine_name.value]
     pitt = engines[Engines.pitt_engine_name.value]
-    lite = engines[Engines.sqlite_engine_name.value]
+    lwp = engines[Engines.local_wp_engine_name.value]
+    sqlite = engines[Engines.sqlite_engine_name.value]
 
-    tests = update_pivot_tables()
+    tests = update_pivot_tables(source_db_engine=pitt.engine, destination_db_engine=lwp.engine)
     ptdf = tests[0]
     tlst = tests[1]
     tkdfs = tests[2]
