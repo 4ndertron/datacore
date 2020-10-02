@@ -75,3 +75,7 @@ class RegexText(Enum):
 class Regex(Enum):
     re_mod = re
     derive_post_from_table_name = re.compile(RegexText.derive_post_from_table_name_rt.value)
+
+
+class DateTimes(Enum):
+    date_string_format_text = '%Y-%m-%d %H:%M:%S'

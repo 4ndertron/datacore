@@ -1,4 +1,4 @@
-import os
+from modules import dt
 from modules import pd
 from modules import env
 from modules import logging
@@ -7,6 +7,7 @@ from modules.sql import MysqlHandler
 from modules.project_enums import Engines
 from modules.project_enums import SQLText
 from modules.project_enums import Regex
+from modules.project_enums import DateTimes
 
 
 def establish_engines():
@@ -75,20 +76,34 @@ def collect_meta_query_field_keys(post_type):
 
 
 def backup_metadata(source_engine_to_backup, backup_destination_engine):
-    # todo: Make a long table of backup metadata that includes:
-    #   event id,
-    #   datetime of event,
-    #   engine_source,
-    #   backup_number for source
     logging.info('Backing up the current state of the postmeta table.')
     post_meta_backup = pd.read_sql('select * from wp_liftenergypitt.wp_postmeta',  # The query isn't universal
                                    source_engine_to_backup).set_index('meta_id')
-    backups = pd.read_sql('select * from main.postmeta_backups', backup_destination_engine)
-    post_meta_backup.to_sql(f'postmeta_backup_{backups["backup_count"][0]}',
-                            con=sqlite.engine,
-                            if_exists='replace')
-    backups["backup_count"][0] += 1
-    backups.to_sql('postmeta_backups', con=sqlite.engine, if_exists='replace', index=False)
+    read_timestamp = dt.datetime.now().strftime(DateTimes.date_string_format_text.value)
+    logging.info(f'describing the table being backed-up, recorded at {read_timestamp}:\n'
+                 f'{post_meta_backup.describe()}')
+    src_url = str(source_engine_to_backup.url)
+    dst_url = str(backup_destination_engine.url)
+
+    backup_information_df = pd.read_sql('select * from postmeta_backups', SqliteHandler().engine, index_col='index')
+    logging.info(f'describing the backup information table df:\n'
+                 f'{backup_information_df.describe()}')
+    if backup_information_df.empty:
+        backup_count = 0
+    else:
+        backup_count = backup_information_df.index.max()
+    table_name = f'postmeta_backup_{backup_count+1}'
+    logging.info(f'evaluating table_name: {table_name}')
+    backup_event = {'event_datetime': [read_timestamp],
+                    'backup_source_engine': [src_url],
+                    'backup_destination_engine': [dst_url]}
+    new_budf = backup_information_df.append(pd.DataFrame(backup_event), ignore_index=True)
+    logging.info(f'describing the new backup information table df after adding this backup event:\n'
+                 f'{new_budf.describe()}')
+    post_meta_backup.to_sql(table_name,
+                            con=backup_destination_engine,
+                            if_exists='fail')  # This means that the backup function has broke due to external factors.
+    new_budf.to_sql('postmeta_backups', con=SqliteHandler().engine, if_exists='replace')
     return 'safe'
 
 
@@ -292,7 +307,6 @@ def sift_metadata_to_groups(name_list=None, group_dict=None):
                 group_dict[parent] = [field]
             else:
                 group_dict[parent].append(field)
-        # todo: parse out just the group names from the group_dict to avoid table names > 64 characters long.
         logging.debug('Sift complete, returning the list\'s groups and their columns.')
         return group_dict
 
@@ -304,14 +318,19 @@ if __name__ == '__main__':
     lwp = engines[Engines.local_wp_engine_name.value]
     sqlite = engines[Engines.sqlite_engine_name.value]
 
-    tests = update_pivot_tables(source_db_engine=pitt.engine, destination_db_engine=lwp.engine)
-    ptdf = tests[0]
-    tlst = tests[1]
-    tkdfs = tests[2]
-    tvdfs = tests[3]
-    tvpdfs = tests[4]
-    tkpdfs = tests[5]
-    tos = tests[6]
-    tgto = tests[7]
-    tpd = tests[8]
-    pivot_tables_dict = tests[9]
+    update_pivot_tables_returns = update_pivot_tables(source_db_engine=pitt.engine,
+                                                      destination_db_engine=lwp.engine)
+    ptdf = update_pivot_tables_returns[0]
+    tlst = update_pivot_tables_returns[1]
+    tkdfs = update_pivot_tables_returns[2]
+    tvdfs = update_pivot_tables_returns[3]
+    tvpdfs = update_pivot_tables_returns[4]
+    tkpdfs = update_pivot_tables_returns[5]
+    tos = update_pivot_tables_returns[6]
+    tgto = update_pivot_tables_returns[7]
+    tpd = update_pivot_tables_returns[8]
+    pivot_tables_dict = update_pivot_tables_returns[9]
+
+    melt_pivot_tables_returns = melt_pivot_tables(source_db_engine=lwp.engine,
+                                                  destination_db_engine=lwp.engine,
+                                                  backup_destination_engine=sqlite.engine)

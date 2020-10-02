@@ -31,7 +31,6 @@ class MysqlHandler:
     def _setup_engine(self):
         conn_args = {
             'auth_plugin': 'mysql_native_password',
-            # 'ssl_cert': env['thepitt_db_ca_path'] if 'pitt' in self._host else None
         }
         url = f'mysql{self._dbapi}://{self._user}:{self._pswd}@{self._host}:{self._port}'
         self.engine = create_engine(url, connect_args=conn_args)
