@@ -75,7 +75,7 @@ def collect_meta_query_field_keys(post_type):
     return raw_query_text % ('like \'\_%\'', post_type)
 
 
-def backup_metadata(source_engine_to_backup, backup_destination_engine):
+def backup_metadata(source_engine_to_backup, backup_destination_engine, backup_table):
     logging.info('Backing up the current state of the postmeta table.')
     post_meta_backup = pd.read_sql('select * from wp_liftenergypitt.wp_postmeta',  # The query isn't universal
                                    source_engine_to_backup).set_index('meta_id')
@@ -85,14 +85,14 @@ def backup_metadata(source_engine_to_backup, backup_destination_engine):
     src_url = str(source_engine_to_backup.url)
     dst_url = str(backup_destination_engine.url)
 
-    backup_information_df = pd.read_sql('select * from postmeta_backups', SqliteHandler().engine, index_col='index')
+    backup_information_df = pd.read_sql('select * from db_table_backups', SqliteHandler().engine, index_col='index')
     logging.info(f'describing the backup information table df:\n'
                  f'{backup_information_df.describe()}')
     if backup_information_df.empty:
         backup_count = 0
     else:
         backup_count = backup_information_df.index.max()
-    table_name = f'postmeta_backup_{backup_count+1}'
+    table_name = f'{backup_table}_backup_{backup_count + 1}'
     logging.info(f'evaluating table_name: {table_name}')
     backup_event = {'event_datetime': [read_timestamp],
                     'backup_source_engine': [src_url],
@@ -311,6 +311,25 @@ def sift_metadata_to_groups(name_list=None, group_dict=None):
         return group_dict
 
 
+def update_local_wp(pitt_db_engine, local_db_engine, sync_tables):
+    """
+    db sync will backup the contents of the destination engine.
+    db sync will overwrite the contents of of the destination engine with contents of the source engine.
+
+    """
+
+    for table in sync_tables:
+        table_df = pd.read_sql(f'select * from wp_liftenergypitt.{table}',
+                               pitt_db_engine)
+        try:
+            table_df.to_sql(table, local_db_engine, schema='wp_liftenergypitt', if_exists='replace', index=False)
+        except Exception as e:
+            logging.critical(e)
+            logging.info(table)
+            continue
+    return 0
+
+
 if __name__ == '__main__':
     logging.debug('Work in Progress')
     engines = establish_engines()
@@ -318,19 +337,38 @@ if __name__ == '__main__':
     lwp = engines[Engines.local_wp_engine_name.value]
     sqlite = engines[Engines.sqlite_engine_name.value]
 
-    update_pivot_tables_returns = update_pivot_tables(source_db_engine=pitt.engine,
-                                                      destination_db_engine=lwp.engine)
-    ptdf = update_pivot_tables_returns[0]
-    tlst = update_pivot_tables_returns[1]
-    tkdfs = update_pivot_tables_returns[2]
-    tvdfs = update_pivot_tables_returns[3]
-    tvpdfs = update_pivot_tables_returns[4]
-    tkpdfs = update_pivot_tables_returns[5]
-    tos = update_pivot_tables_returns[6]
-    tgto = update_pivot_tables_returns[7]
-    tpd = update_pivot_tables_returns[8]
-    pivot_tables_dict = update_pivot_tables_returns[9]
+    # update_pivot_tables_returns = update_pivot_tables(source_db_engine=pitt.engine,
+    #                                                   destination_db_engine=lwp.engine)
+    # ptdf = update_pivot_tables_returns[0]
+    # tlst = update_pivot_tables_returns[1]
+    # tkdfs = update_pivot_tables_returns[2]
+    # tvdfs = update_pivot_tables_returns[3]
+    # tvpdfs = update_pivot_tables_returns[4]
+    # tkpdfs = update_pivot_tables_returns[5]
+    # tos = update_pivot_tables_returns[6]
+    # tgto = update_pivot_tables_returns[7]
+    # tpd = update_pivot_tables_returns[8]
+    # pivot_tables_dict = update_pivot_tables_returns[9]
 
-    melt_pivot_tables_returns = melt_pivot_tables(source_db_engine=lwp.engine,
-                                                  destination_db_engine=lwp.engine,
-                                                  backup_destination_engine=sqlite.engine)
+    # melt_pivot_tables_returns = melt_pivot_tables(source_db_engine=lwp.engine,
+    #                                               destination_db_engine=lwp.engine,
+    #                                               backup_destination_engine=sqlite.engine)
+
+    tables = [
+        'wp_commentmeta',
+        'wp_comments',
+        'wp_links',
+        'wp_options',
+        'wp_postmeta',
+        'wp_posts',
+        'wp_termmeta',
+        'wp_terms',
+        'wp_term_relationships',
+        'wp_term_taxonomy',
+        'wp_usermeta',
+        'wp_users',
+    ]
+
+    update_local_wp(pitt_db_engine=pitt.engine,
+                    local_db_engine=lwp.engine,
+                    sync_tables=tables)
