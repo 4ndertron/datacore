@@ -4,12 +4,22 @@ from . import sa
 
 
 class HandlerParams(Enum):
-    host = 'host'
-    port = 'port'
+    dialect = 'dialect'
+    driver = 'driver'
     user = 'user'
     pswd = 'pswd'
-    name = 'name'
-    valid_params = [host, port, user, pswd, name]
+    host = 'host'
+    port = 'port'
+    database = 'database'
+    conn_args = 'conn_args'
+    valid_params = [dialect,
+                    driver,
+                    user,
+                    pswd,
+                    host,
+                    port,
+                    database,
+                    conn_args]
 
 
 class Engines(Enum):
