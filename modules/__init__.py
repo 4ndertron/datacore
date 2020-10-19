@@ -5,6 +5,7 @@ import datetime as dt
 import pandas as pd
 import sqlalchemy as sa
 from enum import Enum
+from multiprocessing import Pool
 from sqlalchemy import create_engine
 
 logging.basicConfig(level=logging.INFO, format=' %(asctime)s - %(levelname)s - %(message)s')

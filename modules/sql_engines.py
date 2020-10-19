@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine
 from modules.project_enums import Engines
-from modules.project_enums import HandlerParams as hp
 from modules.project_enums import Messages
+from modules.project_enums import SQLText
+from modules.project_enums import HandlerParams as hp
 
 
 class SqliteHandler:
@@ -68,6 +69,7 @@ class EngineHandler:
         self.database = kwargs['database'] if 'database' in kwargs else ''
         self.conn_args = kwargs['conn_args'] if 'conn_args' in kwargs else ''
         self.engine = None
+        self.conn = None
         self._setup_engine()
 
     def _setup_engine(self):
@@ -80,6 +82,13 @@ class EngineHandler:
             self.engine = create_engine(url)
         else:
             self.engine = create_engine(url, connect_args=self.conn_args)
+
+    def _create_conn(self):
+        self.conn = self.engine.connect()
+
+    def _close_conn(self):
+        self.conn.close()
+        self.conn = None
 
     def update_connection_parameters(self, **kwargs):
         self.dialect = kwargs['dialect'] if 'dialect' in kwargs else self.dialect
@@ -99,3 +108,18 @@ class EngineHandler:
         else:
             self._setup_engine()
             return f'{Messages.updated_valid_parameters.value}{",".join(returns)}'
+
+    def schema_exists(self, schema_name):
+        self._create_conn()
+        schemas = [x[1] for x in self.conn.execute(SQLText.select_schemas.value).fetchall()]
+        self._close_conn()
+        return schema_name in schemas
+
+    def create_schema(self, schema_name):
+        if self.schema_exists(schema_name):
+            return f'{schema_name} exists'
+        else:
+            self._create_conn()
+            self.conn.execute(SQLText.create_schema_sql.value.text % schema_name)
+            self._close_conn()
+            return f'{schema_name} created'

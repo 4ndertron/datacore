@@ -1,14 +1,11 @@
 from modules import dt
 from modules import pd
-from modules import env
-from modules import logging
 from modules import json
-from modules.sql_engines import SqliteHandler
-from modules.sql_engines import MysqlHandler
+from modules import logging
 from modules.sql_engines import EngineHandler
-from modules.project_enums import Engines
-from modules.project_enums import SQLText
 from modules.project_enums import Regex
+from modules.project_enums import SQLText
+from modules.project_enums import Messages
 from modules.project_enums import DateTimes
 
 
@@ -19,8 +16,10 @@ class DataHandler:
         self.primary_backup_engine = EngineHandler(dialect='sqlite', database='./data/foo.db')
         self._establish_engines()
 
-    def _establish_engines(self):
-        for engine, params in self.creds.items():
+    def _establish_engines(self, creds=None):
+        if creds is None:
+            creds = self.creds
+        for engine, params in creds.items():
             dialect = params['dialect']
             driver = params['driver']
             user = params['user']
@@ -60,178 +59,186 @@ class DataHandler:
                                                                   if 'conn_args' in params else None)
 
     def backup_db_table(self,
-                        source_engine_to_backup,
-                        backup_destination_engine,
-                        backup_table):
+                        source_engine_to_backup=None,
+                        backup_destination_engine=None,
+                        backup_table=None):
+        if backup_destination_engine is None:
+            backup_destination_engine = self.primary_backup_engine
         logging.info(f'Backing up the current state of the {backup_table} table.')
-        post_meta_backup = pd.read_sql(f'select * from wp_liftenergypitt.{backup_table}',
-                                       source_engine_to_backup).set_index('meta_id')
+        post_meta_backup = pd.read_sql(SQLText.select_all_from_table.value.text % backup_table,
+                                       source_engine_to_backup.engine)
         read_timestamp = dt.datetime.now().strftime(DateTimes.date_string_format_text.value)
-        logging.info(f'describing the table being backed-up, recorded at {read_timestamp}:\n'
+        logging.info(f'describing the table {backup_table}, recorded at {read_timestamp}:\n'
                      f'{post_meta_backup.describe()}')
-        src_url = str(source_engine_to_backup.url)
-        dst_url = str(backup_destination_engine.url)
+        source_url = str(source_engine_to_backup.engine.url)
+        destination_url = str(backup_destination_engine.engine.url)
 
-        backup_information_df = pd.read_sql('select * from db_table_backups', SqliteHandler().engine, index_col='index')
-        logging.info(f'describing the backup information table df:\n'
+        backup_information_df = pd.read_sql(SQLText.select_backup_tables.value.text,
+                                            backup_destination_engine.engine,
+                                            index_col='index')
+        logging.info(f'describing the {backup_table} table df:\n'
                      f'{backup_information_df.describe()}')
         if backup_information_df.empty:
-            backup_count = 0
+            table_count = 0
         else:
-            backup_count = backup_information_df.index.max()
-        table_name = f'{backup_table}_backup_{backup_count + 1}'
+            table_count = backup_information_df['table_count'] \
+                .where(backup_information_df['backup_table'] == backup_table).count()
+        table_name = f'{backup_table}_backup_{table_count + 1}'
         logging.info(f'evaluating table_name: {table_name}')
         backup_event = {'event_datetime': [read_timestamp],
-                        'backup_source_engine': [src_url],
-                        'backup_destination_engine': [dst_url]}
+                        'backup_source_engine': [source_url],
+                        'backup_destination_engine': [destination_url],
+                        'backup_table': [backup_table],
+                        'table_count': [table_count + 1]}
         new_budf = backup_information_df.append(pd.DataFrame(backup_event), ignore_index=True)
         logging.info(f'describing the new backup information table df after adding this backup event:\n'
                      f'{new_budf.describe()}')
         post_meta_backup.to_sql(table_name,
-                                con=backup_destination_engine,
-                                if_exists='fail')  # This means that the backup function has broke due to external factors.
-        new_budf.to_sql('postmeta_backups', con=SqliteHandler().engine, if_exists='replace')
+                                con=backup_destination_engine.engine,
+                                index=False,
+                                if_exists='fail')  # This prevents failures due to external factors.
+        new_budf.to_sql('db_table_backups', con=backup_destination_engine.engine, if_exists='replace')
         return 'safe'
 
-    def pivot_db_tables(self):
-        """
-        Just... It works
-        This function will have it's parts parsed into a single line of functionality that can be utilized
-        by parallel processing.
-        """
-        logging.info('Collecting all distinct post types.')
-        ptqt = SQLText.distinct_post_types.value.text
-        ptmcqt = SQLText.post_type_meta_collection_join.value.text
-        post_type_df = pd.read_sql(ptqt, source_db_engine)
-        type_list = [x[0] for x in post_type_df.values.tolist()]
+    def pivot_db_tables(self,
+                        source_db_engine=None,
+                        destination_db_engine=None,
+                        table_list=None):
+        returns = {}
+        if source_db_engine is None:
+            source_db_engine = self.engines['pitt_engine'].engine
+        if destination_db_engine is None:
+            destination_db_engine = self.engines['local_wp_engine'].engine
+        if table_list is None or len(table_list) < 1:
+            return Messages.no_tables.value
+        for table in table_list:
+            if 'meta' in table:
+                logging.info(f'Begining the pivot procedure for {table}')
+                returns[table] = self._pivot_db_table(source_db_engine=source_db_engine,
+                                                      destination_db_engine=destination_db_engine,
+                                                      source_table=table)
+            else:
+                return Messages.invalid_table_type.value % table
+        return returns
 
-        logging.info('Collecting all the columns for each post type.')
-        type_dfs = {}
-        type_key_dfs = {}
-        type_value_dfs = {}
-        for post_type in type_list:
-            type_dfs[post_type] = pd.read_sql(ptmcqt % post_type, source_db_engine)
-            if post_type not in type_key_dfs:
-                type_key_dfs[post_type] = pd.read_sql(collect_meta_query_field_keys(post_type), source_db_engine)
-            if post_type not in type_value_dfs:
-                type_value_dfs[post_type] = pd.read_sql(collect_meta_query_field_values(post_type), source_db_engine)
+    def _pivot_db_table(self,
+                        source_db_engine,
+                        destination_db_engine,
+                        source_table):
+        logging.info(f'Collecting all distinct post types for {source_table}.')
 
-        logging.info('Organizing all the columns into groups and fields for each post type.')
-        type_organizations = {}
-        for x in [type_key_dfs, type_value_dfs]:
-            logging.debug(f'iterating through {x.keys()}')
-            for pt, pt_df in x.items():
-                logging.debug(f'evaluating {pt}\n\tpt_df: {pt_df.head(1)}')
-                if pt not in type_organizations:
-                    tmp_arg = pt_df['meta_key'].values.tolist()
-                    logging.debug(f'passing tmp_arg to sift_metadata_to_groups method\n\ttmp_arg: {tmp_arg}')
-                    pt_df_org = sift_metadata_to_groups(tmp_arg)
-                    logging.debug(f'evaluating the return of the sifting method\n\t{pt_df_org}')
-                    type_organizations[pt] = pt_df_org
-                else:
-                    tmp_arg = pt_df['meta_key'].values.tolist()
-                    logging.debug(f'passing tmp_arg to sift_metadata_to_groups method\n\ttmp_arg: {tmp_arg}')
-                    pt_df_org = sift_metadata_to_groups(tmp_arg)
-                    logging.debug(f'evaluating the return of the sifting method\n\t{pt_df_org}')
-                    type_organizations[pt].update(pt_df_org)
+        table_prefix = Regex.wpengine_table_prefix.value
+        table_suffix = Regex.wpengine_meta_suffix.value
+        table_entity = table_prefix.sub("", table_suffix.sub("", source_table))
 
-        logging.info(
-            'Melting all the group/field combos with each post type into a type_group_table:columns dictionary')
-        type_group_table_org = {}
-        for pt, ptg in type_organizations.items():
-            for group, cols in ptg.items():
-                cols.append(group) if group != 'f' else None
-                if group == 'f':
-                    table_name = pt
-                else:
-                    table_name = f'{pt}_{group}'
-                type_group_table_org[table_name] = cols
+        meta_key_query_text = SQLText.select_distinct_meta_keys.value.text % source_table
+        meta_key_df = pd.read_sql(meta_key_query_text, source_db_engine.engine)
+        meta_keys = [x[0] for x in meta_key_df.values.tolist()]
+        meta_keys_split = [[], []]
+        for key in meta_keys:
+            index = 0 if key.startswith('_') else 1
+            meta_keys_split[index].append(key)
+        meta_keys_org = [self.sift_metadata_to_groups(split) for split in meta_keys_split]
 
-        logging.info('Pivoting the values for the post types and columns by post_id')
-        type_key_pivot_dfs = {}
-        type_value_pivot_dfs = {}
-        for post_type in type_list:
-            df_key = type_key_dfs[post_type]
-            df_val = type_value_dfs[post_type]
-            if post_type not in type_key_pivot_dfs and df_key.empty is not True:
-                type_key_pivot_dfs[post_type] = df_key.pivot(index='post_id', columns='meta_key', values='meta_value')
-            if post_type not in type_value_pivot_dfs and df_val.empty is not True:
-                type_value_pivot_dfs[post_type] = df_val.pivot(index='post_id', columns='meta_key', values='meta_value')
+        table_content_qt = SQLText.select_all_from_table.value.text % source_table
 
-        logging.info('Merging the key and value dataframes together and placing them in a dictionary.')
-        type_pivot_dfs = {}
-        for tl in type_list:
-            df_list = [x[tl] for x in [type_key_pivot_dfs, type_value_pivot_dfs] if tl in x]
-            logging.debug(f'len(df_list):\n\t{len(df_list)}')
-            if len(df_list) > 0:
-                type_pivot_dfs[tl] = pd.concat(df_list, axis=1)
+        meta_df = pd.read_sql(table_content_qt, source_db_engine.engine)
+        pivot_index = f'{table_entity}_id'
+        meta_pivot_df = meta_df.pivot(index=pivot_index, columns='meta_key', values='meta_value')
 
-        logging.info('Parsing the merged dataframes into the type_group_table:columns format')
-        pivot_tables = {}
-        for table, columns in type_group_table_org.items():
-            post_name = Regex.derive_post_from_table_name.value.search(table)
-            logging.info(f'post_name: {post_name.group()} | table: {table} | len(columns): {len(columns)}')
-            pivot_tables[table] = type_pivot_dfs[post_name.group()].loc[:, columns]
+        pivot_dfs = {}
+        for org in meta_keys_org:
+            for table, columns in org.items():
+                pivot_dfs[table] = meta_pivot_df.loc[:, columns]
 
-        logging.info('Pushing the type_group_table:columns dataframes into the pivot_tables schema.')
-        for table_name, table_data in pivot_tables.items():
-            logging.debug(f'dry run{table_name},\n\tcon={destination_db_engine}')
+        schema_name = f'{source_table}_pivot'
+        destination_db_engine.create_schema(schema_name=schema_name)
+        for table_name, table_data in pivot_dfs.items():
+            logging.debug(f'dry run {table_name}\ncon={destination_db_engine}\nschema={schema_name}')
             table_data.to_sql(table_name,
-                              con=destination_db_engine,
-                              schema='postmeta_pivot_tables',
+                              con=destination_db_engine.engine,
+                              schema=schema_name,
                               if_exists='replace')
 
-        return [
-            # No return value is required, however, these variables are returned for exploring the data in a console.
-            post_type_df,
-            type_list,
-            type_key_dfs,
-            type_value_dfs,
-            type_value_pivot_dfs,
-            type_key_pivot_dfs,
-            type_organizations,
-            type_group_table_org,
-            type_pivot_dfs,
-            pivot_tables
-        ]
+        return [meta_keys,
+                meta_keys_org,
+                meta_df,
+                meta_pivot_df,
+                pivot_dfs,
+                schema_name]
 
-    def melt_pivot_tables(self):
-        logging.info('Grabbing the list of pivot table names.')
-        apt = SQLText.all_pivot_tables.value.text
-        pt_df = pd.read_sql(apt, source_db_engine)
-        table_names = [x[0] for x in pt_df.values.tolist()]
+    def melt_pivot_schemas(self,
+                           source_db_engine=None,
+                           destination_db_engine=None,
+                           backup_engine=None,
+                           schema_list=None):
+        if source_db_engine is None:
+            source_db_engine = self.engines['local_wp_engine']
+        if destination_db_engine is None:
+            destination_db_engine = self.engines['local_wp_engine']
+        if backup_engine is None:
+            backup_engine = self.engines['sqlite_engine']
+        if schema_list is None:
+            return Messages.no_schemas.value
+        for schema in schema_list:
+            if 'pivot' in schema:
+                self._melt_pivot_tables(source_db_engine=source_db_engine,
+                                        destination_db_engine=destination_db_engine,
+                                        backup_engine=backup_engine,
+                                        schema_name=schema)
+            else:
+                return Messages.invalid_schema_type.value % schema
+
+    def _melt_pivot_tables(self,
+                           source_db_engine,
+                           destination_db_engine,
+                           backup_engine,
+                           schema_name):
+        logging.info(f'Grabbing the list of pivot table names from {schema_name}.')
+        sst = SQLText.select_schema_tables.value.text % schema_name
+        schema_prefix = Regex.wpengine_table_prefix.value
+        schema_suffix = Regex.wpengine_meta_suffix.value
+        pivot_suffix = Regex.pivot_schema_suffix.value
+        melt_id = f'{schema_prefix.sub("", schema_suffix.sub("", pivot_suffix.sub("", schema_name)))}_id'
+        destination_table = pivot_suffix.sub("", schema_name)
+        schema_tables = pd.read_sql(sst, source_db_engine.engine)
+        table_names = [x[0] for x in schema_tables.values.tolist()]
 
         logging.info('Extracting the contents of each pivot table.')
-        pivot_dfs = [pd.read_sql(f'select * from pivot_tables.`{x}`', source_db_engine) for x in table_names]
+        pivot_dfs = [pd.read_sql(f'select * from {schema_name}.`{x}`', source_db_engine.engine) for x in table_names]
 
         logging.info('Metling the extracted data.')
-        melt_dfs = [df.melt(id_vars='post_id', var_name='meta_key', value_name='meta_value') for df in pivot_dfs]
+        melt_dfs = [df.melt(id_vars=melt_id, var_name='meta_key', value_name='meta_value') for df in pivot_dfs]
 
-        bu_status = backup_metadata(source_engine_to_backup=destination_db_engine,
-                                    backup_destination_engine=backup_destination_engine)
-
+        bu_status = self.backup_db_table(source_engine_to_backup=destination_db_engine,
+                                         backup_destination_engine=backup_engine,
+                                         backup_table=destination_table)
+        # todo: delete rows with null values?
         if bu_status == 'safe':
             logging.info('Updating the postmeta table with the melted data.')
             for df in melt_dfs:
-                df.to_sql('wp_postmeta',
-                          con=destination_db_engine,
+                df.to_sql(destination_table,
+                          con=destination_db_engine.engine,
                           schema='wp_liftenergypitt',
                           if_exists='append',
                           index=False)
         return [table_names, pivot_dfs, melt_dfs]
 
-    def update_local_wp(self):
+    def update_local_wp(self, sync_tables=None):
         """
         db sync will backup the contents of the destination engine.
         db sync will overwrite the contents of of the destination engine with contents of the source engine.
 
         """
-
+        pitt_engine = self.engines['pitt_engine'].engine
+        local_wp_engine = self.engines['local_wp_engine'].engine
+        if sync_tables is None:
+            return Messages.no_tables.value
         for table in sync_tables:
-            table_df = pd.read_sql(f'select * from wp_liftenergypitt.{table}',
-                                   pitt_db_engine)
+            table_df = pd.read_sql(SQLText.select_all_from_table.value.text % table,
+                                   pitt_engine)
             try:
-                table_df.to_sql(table, local_db_engine, schema='wp_liftenergypitt', if_exists='replace', index=False)
+                table_df.to_sql(table, local_wp_engine, schema='wp_liftenergypitt', if_exists='replace', index=False)
             except Exception as e:
                 logging.critical(e)
                 logging.info(table)
@@ -348,9 +355,24 @@ def main():
     creds_string = open('../secrets/creds.json', 'r').read()
     creds = json.loads(creds_string)
     logging.info(creds)
-    dh = DataHandler(creds=creds)
-    return dh
+    data_handler = DataHandler(creds=creds)
+    return data_handler
 
 
 if __name__ == '__main__':
-    data = main()
+    dh = main()
+    pitt = dh.engines['pitt_engine']
+    loc = dh.engines['local_wp_engine']
+    lite = dh.engines['sqlite_engine']
+
+    pivot_tables = ['wp_postmeta', 'wp_usermeta']
+    melt_schemas = ['wp_postmeta_pivot', 'wp_usermeta_pivot']
+
+    pivot_returns = dh.pivot_db_tables(source_db_engine=pitt,
+                                       destination_db_engine=loc,
+                                       table_list=pivot_tables)
+
+    melt_returns = dh.melt_pivot_schemas(source_db_engine=loc,
+                                         destination_db_engine=loc,
+                                         backup_engine=lite,
+                                         schema_list=melt_schemas)
