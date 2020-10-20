@@ -68,16 +68,16 @@ class DataHandler:
         post_meta_backup = pd.read_sql(SQLText.select_all_from_table.value.text % backup_table,
                                        source_engine_to_backup.engine)
         read_timestamp = dt.datetime.now().strftime(DateTimes.date_string_format_text.value)
-        logging.info(f'describing the table {backup_table}, recorded at {read_timestamp}:\n'
-                     f'{post_meta_backup.describe()}')
+        logging.debug(f'describing the table {backup_table}, recorded at {read_timestamp}:\n'
+                      f'{post_meta_backup.describe()}')
         source_url = str(source_engine_to_backup.engine.url)
         destination_url = str(backup_destination_engine.engine.url)
 
         backup_information_df = pd.read_sql(SQLText.select_backup_tables.value.text,
                                             backup_destination_engine.engine,
                                             index_col='index')
-        logging.info(f'describing the {backup_table} table df:\n'
-                     f'{backup_information_df.describe()}')
+        logging.debug(f'describing the {backup_table} table df:\n'
+                      f'{backup_information_df.describe()}')
         if backup_information_df.empty:
             table_count = 0
         else:
@@ -89,10 +89,11 @@ class DataHandler:
                         'backup_source_engine': [source_url],
                         'backup_destination_engine': [destination_url],
                         'backup_table': [backup_table],
-                        'table_count': [table_count + 1]}
+                        'table_count': [table_count + 1],
+                        'backup_table_name': [f'{backup_table}_backup_{table_count + 1}']}
         new_budf = backup_information_df.append(pd.DataFrame(backup_event), ignore_index=True)
-        logging.info(f'describing the new backup information table df after adding this backup event:\n'
-                     f'{new_budf.describe()}')
+        logging.debug(f'describing the new backup information table df after adding this backup event:\n'
+                      f'{new_budf.describe()}')
         post_meta_backup.to_sql(table_name,
                                 con=backup_destination_engine.engine,
                                 index=False,
@@ -155,6 +156,7 @@ class DataHandler:
         destination_db_engine.create_schema(schema_name=schema_name)
         for table_name, table_data in pivot_dfs.items():
             logging.debug(f'dry run {table_name}\ncon={destination_db_engine}\nschema={schema_name}')
+            table_data.dropna(how='all', inplace=True, thresh=1)
             table_data.to_sql(table_name,
                               con=destination_db_engine.engine,
                               schema=schema_name,
@@ -195,7 +197,7 @@ class DataHandler:
                            backup_engine,
                            schema_name):
         logging.info(f'Grabbing the list of pivot table names from {schema_name}.')
-        sst = SQLText.select_schema_tables.value.text % schema_name
+        sst = SQLText.select_schema_tables.value.text % f'\'{schema_name}\''
         schema_prefix = Regex.wpengine_table_prefix.value
         schema_suffix = Regex.wpengine_meta_suffix.value
         pivot_suffix = Regex.pivot_schema_suffix.value
@@ -213,15 +215,16 @@ class DataHandler:
         bu_status = self.backup_db_table(source_engine_to_backup=destination_db_engine,
                                          backup_destination_engine=backup_engine,
                                          backup_table=destination_table)
-        # todo: delete rows with null values?
         if bu_status == 'safe':
             logging.info('Updating the postmeta table with the melted data.')
+
             for df in melt_dfs:
                 df.to_sql(destination_table,
                           con=destination_db_engine.engine,
                           schema='wp_liftenergypitt',
                           if_exists='append',
                           index=False)
+
         return [table_names, pivot_dfs, melt_dfs]
 
     def update_local_wp(self, sync_tables=None):
@@ -232,18 +235,26 @@ class DataHandler:
         """
         pitt_engine = self.engines['pitt_engine'].engine
         local_wp_engine = self.engines['local_wp_engine'].engine
+        returns = {'success': {}, 'failures': {}}
         if sync_tables is None:
-            return Messages.no_tables.value
+            tables_df = pd.read_sql(
+                SQLText.select_schema_tables.value.text % '\'wp_liftenergypitt\' and table_name not like \'%wf%\'',
+                pitt_engine)
+            sync_tables = [x[0] for x in tables_df.values.tolist()]
         for table in sync_tables:
             table_df = pd.read_sql(SQLText.select_all_from_table.value.text % table,
                                    pitt_engine)
             try:
-                table_df.to_sql(table, local_wp_engine, schema='wp_liftenergypitt', if_exists='replace', index=False)
+                if table != 'wp_options':
+                    table_df.to_sql(table, local_wp_engine, schema='wp_liftenergypitt', if_exists='replace',
+                                    index=False)
+                    returns['success'][table] = table_df
             except Exception as e:
                 logging.critical(e)
                 logging.info(table)
+                returns['failures'][table] = {'event': e, 'df': table_df}
                 continue
-        return 0
+        return returns
 
     @staticmethod
     def collect_meta_query_field_values(post_type):
@@ -376,3 +387,5 @@ if __name__ == '__main__':
                                          destination_db_engine=loc,
                                          backup_engine=lite,
                                          schema_list=melt_schemas)
+
+    update_return = dh.update_local_wp()

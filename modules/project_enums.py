@@ -101,7 +101,7 @@ class SQLText(Enum):
     select_schema_tables = sa.text('''
     select table_name
     from information_schema.tables
-    where table_schema = '%s';
+    where table_schema = %s;
     ''')
     backup_table_ddl = sa.text('''
     create table db_table_backups
