@@ -25,6 +25,7 @@ dh = DataHandler(creds=json.loads(open('./secrets/creds.json', 'r').read()))
 
 
 def animate(i):
+    # todo: Setup metrics for the crm and display them here.
     pull_data = open('./data/sampleText.txt', 'r').read()
     data_array = pull_data.split('\n')
     xar = []
@@ -59,12 +60,21 @@ class DataCore(tk.Tk):
         filemenu.add_separator()
         filemenu.add_command(label="Exit", command=quit)
         menubar.add_cascade(label="File", menu=filemenu)
+        actionsmenu = tk.Menu(menubar, tearoff=0)
+        actionsmenu.add_command(label='Reset Credentials',
+                                command=lambda: dh.update_engines(json.loads(open('./secrets/creds.json', 'r').read())))
+        actionsmenu.add_command(label='Run Pivot Tables',
+                                command=lambda: dh.pivot_db_tables(['wp_commentmeta',
+                                                                    'wp_postmeta',
+                                                                    'wp_termmeta',
+                                                                    'wp_usermeta']))
+        menubar.add_cascade(label='Actions', menu=actionsmenu)
 
         tk.Tk.config(self, menu=menubar)
 
         self.frames = {}
 
-        for F in (StartPage, DCPage):
+        for F in (StartPage, DCPage, DataDisplayPage):
             frame = F(container, self)
             self.frames[F] = frame
             frame.grid(row=0,
@@ -99,6 +109,26 @@ class StartPage(tk.Frame):
 
 
 class DCPage(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        label = ttk.Label(self,
+                          text='Home',
+                          font=LARGE_FONT)
+        label.pack(padx=10,
+                   pady=10)
+
+        button1 = ttk.Button(self,
+                             text='Go to Start Page',
+                             command=lambda: controller.show_frame(StartPage))
+        button1.pack()
+
+        button2 = ttk.Button(self,
+                             text='Go to Data Display Page',
+                             command=lambda: controller.show_frame(DataDisplayPage))
+        button2.pack()
+
+
+class DataDisplayPage(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent)
         label = ttk.Label(self,

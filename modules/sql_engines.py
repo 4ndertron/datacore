@@ -48,7 +48,7 @@ class EngineHandler:
         self.database = kwargs['database'] if 'database' in kwargs else self.database
         self.conn_args = kwargs['conn_args'] if 'conn_args' in kwargs else self.conn_args
         returns = []
-        for k, v in kwargs:
+        for k, v in kwargs.items():
             if k in self.valid_parameters:
                 returns.append(k)
         if len(returns) == 0:

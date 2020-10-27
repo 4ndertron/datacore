@@ -238,7 +238,7 @@ class DataHandler:
         returns = {'success': {}, 'failures': {}}
         if sync_tables is None:
             tables_df = pd.read_sql(
-                SQLText.select_schema_tables.value.text % '\'wp_liftenergypitt\' and table_name not like \'%wf%\'',
+                SQLText.select_schema_tables.value.text % '\'wp_liftenergypitt\'',
                 pitt_engine)
             sync_tables = [x[0] for x in tables_df.values.tolist()]
         for table in sync_tables:
@@ -376,16 +376,16 @@ if __name__ == '__main__':
     loc = dh.engines['local_wp_engine']
     lite = dh.engines['sqlite_engine']
 
-    pivot_tables = ['wp_postmeta', 'wp_usermeta']
+    pivot_tables = ['wp_commentmeta', 'wp_postmeta', 'wp_termmeta', 'wp_usermeta']
     melt_schemas = ['wp_postmeta_pivot', 'wp_usermeta_pivot']
 
-    pivot_returns = dh.pivot_db_tables(source_db_engine=pitt,
-                                       destination_db_engine=loc,
-                                       table_list=pivot_tables)
+    # pivot_returns = dh.pivot_db_tables(source_db_engine=pitt,
+    #                                    destination_db_engine=loc,
+    #                                    table_list=pivot_tables)
 
-    melt_returns = dh.melt_pivot_schemas(source_db_engine=loc,
-                                         destination_db_engine=loc,
-                                         backup_engine=lite,
-                                         schema_list=melt_schemas)
+    # melt_returns = dh.melt_pivot_schemas(source_db_engine=loc,
+    #                                      destination_db_engine=loc,
+    #                                      backup_engine=lite,
+    #                                      schema_list=melt_schemas)
 
-    update_return = dh.update_local_wp()
+    # update_return = dh.update_local_wp()

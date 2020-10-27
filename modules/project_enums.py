@@ -1,6 +1,7 @@
 import re
 from enum import Enum
 from . import sa
+from . import dt
 
 
 class HandlerParams(Enum):
@@ -20,6 +21,41 @@ class HandlerParams(Enum):
                     port,
                     database,
                     conn_args]
+
+
+class WpEntities(Enum):
+    comment = 'comment'
+    post = 'post'
+    term = 'term'
+    user = 'user'
+
+
+class JobNimbus_to_WPEngine_Mapping(Enum):
+    post_template = {
+        'post_author': [''],
+        'post_date': [''],
+
+    }
+    conversion_map = {
+        'account': {
+            'post': post_template,
+            'post_meta': {
+
+            }
+        },
+        'system': {
+            'post': post_template,
+            'post_meta': {
+
+            },
+        },
+        'proposal': {
+            'post': post_template,
+            'post_meta': {
+
+            },
+        },
+    }
 
 
 class Engines(Enum):
