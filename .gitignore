@@ -1,3 +1,4 @@
 /data
 /secrets
 .idea
+/modules/.gitignore
