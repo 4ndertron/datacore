@@ -1,24 +1,41 @@
-import asyncio
+import pandas as pd
+from modules.data_handler import DataHandler
+from modules.module_enums import JobNimbus_to_WPEngine_Mapping as Mapping
+from modules.module_enums import SQLText
+from modules import json
 
 
-async def find_divisibles(inrange, div_by):
-    print("finding nums in range {} divisible by {}".format(inrange, div_by))
-    located = []
-    for i in range(inrange):
-        if i % div_by == 0:
-            located.append(i)
-    print("Done w/ nums in range {} divisible by {}".format(inrange, div_by))
-    return located
+def dh_main():
+    creds_string = open('./secrets/creds.json', 'r').read()
+    creds = json.loads(creds_string)
+    data_handler = DataHandler(creds=creds)
+    return data_handler
 
 
-async def main():
-    divs1 = loop.create_task(find_divisibles(508000, 341))
-    divs2 = loop.create_task(find_divisibles(100052, 320))
-    divs3 = loop.create_task(find_divisibles(500, 3))
-    await asyncio.wait([divs1, divs2, divs3])
+def main():
+    return 0
 
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
-    loop.close()
+    m = main()
+    dh = dh_main()
+
+    pitt = dh.engines['pitt_engine']
+    loc = dh.engines['docker_engine']
+    lite = dh.engines['sqlite_engine']
+
+    pivot_tables = ['wp_commentmeta', 'wp_postmeta', 'wp_termmeta', 'wp_usermeta']
+    melt_schemas = ['wp_postmeta_pivot', 'wp_usermeta_pivot']
+    jn_map = Mapping.conversion_map.value
+
+    convert_returns = dh.convert_jn_tables_to_wp(jn_engine=loc, field_map=jn_map)
+    bridge = convert_returns[2]
+    bridge_dict = bridge.to_dict()
+    jn_df = pd.read_sql("select * from jobnimbus.contact", loc.engine)
+    dft = jn_df.assign(account_id=lambda df: df.loc[:, 'Address Line']
+                                             + ', ' + df.loc[:, 'City']
+                                             + ', ' + df.loc[:, 'State']
+                                             + ', USA')
+    # for i in range(3):  # This works
+    #     account_post = dh.create_single_post_df(post_type='account', creator_id=5, source_engine=loc)
+    #     account_post.to_sql('wp_posts', loc.engine, schema='wp_liftenergypitt', if_exists='append', index=False)
