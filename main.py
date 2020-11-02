@@ -12,6 +12,35 @@ def dh_main():
     return data_handler
 
 
+def zipper(**kwargs):
+    """
+    This function will take the raw job nimbus data, extract the columns required for the wp engine, and rename
+    the columns to the pivot table column names in WPEngine.
+
+    potential workflow:
+    collect active users
+    for each user:
+        gather all accounts
+        create a blank account for the number of accounts.
+        for each account:
+            get post_id
+            populate post_id with account_id
+            use account/post_id pairs to map jn and wp tables together in the sequence of the pitt's workflow
+    """
+    jn = kwargs.get('jn')
+    mapper = kwargs.get('map')
+    bridge = kwargs.get('bridge')
+    pm = mapper['system']['post_meta']
+    new_cols = {v[0]: k for k, v in pm.items()}
+    new_jn = jn.loc[:, [x for x in new_cols.keys()]]
+    new_jn.rename(columns=new_cols, inplace=True)
+    # create custom org by iterating through the columns
+    # parse new_jn into new org
+    # append parsed df to their corresponding pivot table.
+    # todo: Find a way to tie an account's post ID to the account_id so the parsed DF's can attach the required post_id
+    return [pm, new_cols, new_jn]
+
+
 def main():
     return 0
 
@@ -29,13 +58,16 @@ if __name__ == '__main__':
     jn_map = Mapping.conversion_map.value
 
     convert_returns = dh.convert_jn_tables_to_wp(jn_engine=loc, field_map=jn_map)
-    bridge = convert_returns[2]
+    bridge = convert_returns[3]
     bridge_dict = bridge.to_dict()
     jn_df = pd.read_sql("select * from jobnimbus.contact", loc.engine)
     dft = jn_df.assign(account_id=lambda df: df.loc[:, 'Address Line']
                                              + ', ' + df.loc[:, 'City']
                                              + ', ' + df.loc[:, 'State']
                                              + ', USA')
+    z_return = zipper(jn=dft, map=jn_map, bridge=bridge)
+    nj = z_return[2]
+    nc = z_return[1]
     # for i in range(3):  # This works
     #     account_post = dh.create_single_post_df(post_type='account', creator_id=5, source_engine=loc)
     #     account_post.to_sql('wp_posts', loc.engine, schema='wp_liftenergypitt', if_exists='append', index=False)
