@@ -3,16 +3,17 @@ from modules import pd
 from modules import json
 from modules import logging
 from modules.sql_engines import EngineHandler
-from modules.project_enums import Regex
-from modules.project_enums import SQLText
-from modules.project_enums import Messages
-from modules.project_enums import DateTimes
+from modules.module_enums import Regex
+from modules.module_enums import JobNimbus_to_WPEngine_Mapping as mapping
+from modules.module_enums import SQLText
+from modules.module_enums import Messages
+from modules.module_enums import DateTimes
 
 
 class DataHandler:
     def __init__(self, *args, **kwargs):
         self.engines = {}
-        self.creds = kwargs['creds'] if 'creds' in kwargs else None
+        self.creds = kwargs.get('creds')
         self.primary_backup_engine = EngineHandler(dialect='sqlite', database='./data/foo.db')
         self._establish_engines()
 
@@ -20,14 +21,14 @@ class DataHandler:
         if creds is None:
             creds = self.creds
         for engine, params in creds.items():
-            dialect = params['dialect']
-            driver = params['driver']
-            user = params['user']
-            pswd = params['pswd']
-            host = params['host']
-            port = params['port']
-            database = params['database']
-            conn_args = params['conn_args'] if 'conn_args' in engine else None
+            dialect = params.get('dialect')
+            driver = params.get('driver')
+            user = params.get('user')
+            pswd = params.get('pswd')
+            host = params.get('host')
+            port = params.get('port')
+            database = params.get('database')
+            conn_args = params.get('conn_args')
             self.engines[engine] = EngineHandler(dialect=dialect,
                                                  driver=driver,
                                                  user=user,
@@ -54,7 +55,7 @@ class DataHandler:
                                                                   pswd=params['pswd'],
                                                                   host=params['host'],
                                                                   port=params['port'],
-                                                                  database=params['database'],
+                                                                  database=params['data'],
                                                                   conn_args=params['conn_args']
                                                                   if 'conn_args' in params else None)
 
@@ -109,7 +110,7 @@ class DataHandler:
         if source_db_engine is None:
             source_db_engine = self.engines['pitt_engine'].engine
         if destination_db_engine is None:
-            destination_db_engine = self.engines['local_wp_engine'].engine
+            destination_db_engine = self.engines['docker_engine'].engine
         if table_list is None or len(table_list) < 1:
             return Messages.no_tables.value
         for table in table_list:
@@ -175,9 +176,9 @@ class DataHandler:
                            backup_engine=None,
                            schema_list=None):
         if source_db_engine is None:
-            source_db_engine = self.engines['local_wp_engine']
+            source_db_engine = self.engines['docker_engine']
         if destination_db_engine is None:
-            destination_db_engine = self.engines['local_wp_engine']
+            destination_db_engine = self.engines['docker_engine']
         if backup_engine is None:
             backup_engine = self.engines['sqlite_engine']
         if schema_list is None:
@@ -234,7 +235,7 @@ class DataHandler:
 
         """
         pitt_engine = self.engines['pitt_engine'].engine
-        local_wp_engine = self.engines['local_wp_engine'].engine
+        local_wp_engine = self.engines['docker_engine'].engine
         returns = {'success': {}, 'failures': {}}
         if sync_tables is None:
             tables_df = pd.read_sql(
@@ -255,6 +256,91 @@ class DataHandler:
                 returns['failures'][table] = {'event': e, 'df': table_df}
                 continue
         return returns
+
+    def convert_jn_tables_to_wp(self, **kwargs):
+        """
+        potential workflow:
+        collect active users
+        for each user:
+            gather all accounts
+            create a blank account for the number of accounts.
+            for each account:
+                get post_id
+                populate post_id with account_id
+                use account/post_id pairs to map jn and wp tables together in the sequence of the pitt's workflow
+        """
+        tp_engine = kwargs.get('tp_engine')
+        ld_engine = kwargs.get('ld_engine')
+        jn_engine = kwargs.get('jn_engine')
+        tp_users = pd.read_sql(SQLText.select_all_from_table.value.text % 'wp_users', tp_engine.engine)
+        field_mapping = kwargs.get('field_map')
+        account_ids = pd.read_sql(SQLText.select_distinct_jobnimbus_accounts.value.text, jn_engine.engine)
+        jn_tables = pd.read_sql("select table_name from information_schema.tables where TABLE_SCHEMA = 'jobnimbus'",
+                                jn_engine.engine)
+
+        jn_df = pd.read_sql("select * from jobnimbus.contact", jn_engine.engine)
+        jn_dft = jn_df.assign(account_id=lambda df: df.loc[:, 'Address Line']
+                                                    + ', ' + df.loc[:, 'City']
+                                                    + ', ' + df.loc[:, 'State']
+                                                    + ', USA')
+        column_bridge = pd.read_sql(SQLText.select_pivot_column_metadata.value.text, jn_engine.engine)
+        jn_tables_dict = jn_tables.to_dict()
+
+        users_dfs = {}
+        for row in tp_users.iterrows():
+            users_dfs[row[1]['ID']] = jn_dft.loc[jn_dft.loc[:, 'Sales Rep'] == row[1]['display_name'], :]
+        self._test_users_dict(users_dict=users_dfs)
+
+        return [
+            account_ids,  # 0
+            jn_tables,  # 1
+            jn_df,  # 2
+            column_bridge,  # 3
+            users_dfs  # 4
+        ]
+
+    def _test_users_dict(self, **kwargs):
+        users = kwargs.get('users_dict')
+        for user, df in users.items():
+            if df.empty:
+                continue
+            print(f'{user} len(df): {len(df)}')
+
+    def create_single_post_df(self, **kwargs):
+        post_type = kwargs.get('post_type')
+        creator_id = kwargs.get('creator_id')
+        source_engine = kwargs.get('source_engine')
+        logging.debug(kwargs)
+
+        timestamp = dt.datetime.now().strftime(DateTimes.date_string_format_text.value)
+        # todo: factor in thepitt.io's global counter... later
+        #   it may not be required since this program is usually for a one time update of old records.
+        post_title = self._calculate_post_type_title(post_type=post_type, source_engine=source_engine)
+        guid = f'https://thpitt.io/{post_type}/{post_title}/'
+
+        logging.debug(post_title)
+
+        post_type_template = mapping.conversion_map.value[post_type]['post']
+        post_type_template['post_type'] = post_type
+        post_type_template['post_author'] = creator_id
+        post_type_template['post_title'] = post_title
+        post_type_template['post_name'] = post_title
+        post_type_template['guid'] = guid
+        post_type_template['post_date'] = timestamp
+        post_type_template['post_date_gmt'] = timestamp
+        post_type_template['post_modified'] = timestamp
+        post_type_template['post_modified_gmt'] = timestamp
+        return pd.DataFrame(post_type_template)
+
+    def _calculate_post_type_title(self, **kwargs):
+        post_type = kwargs.get('post_type')
+        source_engine = kwargs.get('source_engine')
+        if source_engine is None:
+            source_engine = self.engines['docker_engine']
+        qt = SQLText.select_account_tally.value.text % post_type
+        logging.debug(qt)
+        current_max_tally = pd.read_sql(qt, source_engine.engine)
+        return int(current_max_tally.to_dict()['idcount'][0]) + 1
 
     @staticmethod
     def collect_meta_query_field_values(post_type):
@@ -373,11 +459,12 @@ def main():
 if __name__ == '__main__':
     dh = main()
     pitt = dh.engines['pitt_engine']
-    loc = dh.engines['local_wp_engine']
+    loc = dh.engines['docker_engine']
     lite = dh.engines['sqlite_engine']
 
     pivot_tables = ['wp_commentmeta', 'wp_postmeta', 'wp_termmeta', 'wp_usermeta']
     melt_schemas = ['wp_postmeta_pivot', 'wp_usermeta_pivot']
+    jn_map = mapping.conversion_map.value
 
     # pivot_returns = dh.pivot_db_tables(source_db_engine=pitt,
     #                                    destination_db_engine=loc,
@@ -389,3 +476,6 @@ if __name__ == '__main__':
     #                                      schema_list=melt_schemas)
 
     # update_return = dh.update_local_wp()
+
+    convert_returns = dh.convert_jn_tables_to_wp(jn_engine=loc, field_map=jn_map)
+    account_post = dh.create_single_post_df(post_type='account', creator_id=5, source_engine=loc)
