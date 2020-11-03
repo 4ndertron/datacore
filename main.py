@@ -61,4 +61,3 @@ if __name__ == '__main__':
     convert_returns = dh.convert_jn_tables_to_wp(jn_engine=loc, tp_engine=pitt, ld_engine=loc, field_map=jn_map)
     bridge = convert_returns[3]
     users_dict = convert_returns[4]
-
