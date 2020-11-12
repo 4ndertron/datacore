@@ -1,11 +1,11 @@
-select t.meta_value,
-       t.ct,
-       m.post_id,
-       p.post_author,
-       u.display_name,
-       p.post_date,
-       p.ID,
-       p.post_name
+select t.meta_value
+     , t.ct
+     , m.post_id
+     , p.post_author
+     , u.display_name
+     , p.post_date
+     , p.ID
+     , p.post_name
 from (
          select m.meta_value, count(m.meta_value) as ct
          from wp_liftenergypitt.wp_postmeta as m
