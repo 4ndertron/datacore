@@ -1,104 +1,22 @@
-import pandas as pd
+from modules import os
 from modules import json
-from modules.rest_api import GMapPlace
-from modules.little_gsheet import GSheet
-from modules.module_enums import SQLText
-from modules.data_handler import DataHandler
-from modules.module_enums import JobNimbus_to_WPEngine_Mapping as Mapping
+from modules import secrets_dir
+from modules.auditor import Auditor
 
 
-def dh_main():
-    creds_string = open('./secrets/creds.json', 'r').read()
-    creds = json.loads(creds_string)
-    data_handler = DataHandler(creds=creds['databases'])
-    return [data_handler, creds]
-
-
-def zipper(**kwargs):
-    """
-    This function will take the raw job nimbus data, extract the columns required for the wp engine, and rename
-    the columns to the pivot table column names in WPEngine.
-
-    """
-    jn = kwargs.get('jn')
-    mapper = kwargs.get('map')
-    bridge = kwargs.get('bridge')
-    pm = mapper['system']['post_meta']
-    new_cols = {v[0]: k for k, v in pm.items()}
-    new_jn = jn.loc[:, [x for x in new_cols.keys()]]
-    new_jn.rename(columns=new_cols, inplace=True)
-    # create custom org by iterating through the columns
-    # parse new_jn into new org
-    # append parsed df to their corresponding pivot table.
-    # todo: Find a way to tie an account's post ID to the account_id so the parsed DF's can attach the required post_id
-    return [pm, new_cols, new_jn]
-
-
-def main():
-    return 0
-
-
-def audit():
-    # What to lookout for...
-    #   1. address validation (use gmaps api)
-    #   2. generic customer data (find duplicate fields)
-    #   3. missing data (find null values in key fields)
-    #   4. easily crackable passwords (throw blackarch at the hashes)
-    #   5. escaped tab characters in text fields (originally found in usermeta).
-    return 0
+def load_custom_credentials():
+    with open(os.path.join(secrets_dir, 'custom_credentials.json'), 'r') as cc:
+        jt = json.loads(cc.read())
+        return jt
 
 
 if __name__ == '__main__':
-    m = main()
-    dh_return = dh_main()
-    dh = dh_return[0]
-    creds = dh_return[1]
-
-    update_returns = dh.update_local_wp()
+    my_credentials = load_custom_credentials()
+    auditor = Auditor(credentials=my_credentials)
+    dh = auditor.data_handler
+    api = auditor.api_handler
 
     pitt = dh.engines['pitt_engine']
     loc = dh.engines['docker_engine']
     lite = dh.engines['sqlite_engine']
-
-    pivot_tables = ['wp_commentmeta', 'wp_postmeta', 'wp_termmeta', 'wp_usermeta']
-    melt_schemas = ['wp_postmeta_pivot', 'wp_usermeta_pivot']
-    jn_map = Mapping.conversion_map.value
-
-    jn_df = pd.read_sql("select * from jobnimbus.contact", loc.engine)
-    dft = jn_df.assign(account_id=lambda df: df.loc[:, 'Address Line']
-                                             + ', ' + df.loc[:, 'City']
-                                             + ', ' + df.loc[:, 'State']
-                                             + ', ' + df.loc[:, 'Zip']
-                                             + ', USA')
-
-    # for i in range(3):  # This works
-    #     account_post = dh.create_single_post_df(post_type='account', creator_id=5, source_engine=loc)
-    #     account_post.to_sql('wp_posts', loc.engine, schema='wp_liftenergypitt', if_exists='append', index=False)
-
-    # convert_returns = dh.convert_jn_tables_to_wp(jn_engine=loc, tp_engine=pitt, ld_engine=loc, field_map=jn_map)
-    # bridge = convert_returns[3]
-    # users_dict = convert_returns[4]
-
-    gs = GSheet('1JH7x89nosp4gCJLAWZ9CkzJroxBnhMhIMqGTF7I6jm0')
-
-    gmp = creds['requests']['google_maps']
-    gm = GMapPlace(key=gmp['key'], scope=gmp['url'][0])
-
-    # test = {}
-    # for row in dft.iterrows():
-    #     if row[1]['Address Line'] != '':
-    #         try:
-    #             test[row[1]['account_id']] = \
-    #                 gm.return_search(row[1]['account_id'])['request'].json()['results'][0]['geometry']['location']
-    #         except Exception as e:
-    #             test[row[1]['account_id']] = e
-
-    search_returns = gm.return_search('576 East Deodar Lane, Lemoore, CA, , USA')
-    r = search_returns['request']
-    r_json = r.json()
-    r_relevant_data = r_json['results'][0]
-    r_address = r_relevant_data['formatted_address']
-    r_geometry = r_relevant_data['geometry']['location']
-    r_lat = r_geometry['lat']
-    r_lng = r_geometry['lng']
-    r_place_id = r_relevant_data['place_id']
+    gm = api.apis['google_maps_place']

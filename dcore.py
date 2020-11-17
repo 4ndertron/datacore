@@ -9,7 +9,7 @@ import json
 import tkinter as tk
 import matplotlib
 import matplotlib.animation as animation
-from modules.data_handler import DataHandler
+from modules.Handlers.data_handler import DataHandler
 from tkinter import ttk
 from matplotlib import style
 from matplotlib.figure import Figure
@@ -21,7 +21,7 @@ style.use('ggplot')
 
 f = Figure(figsize=(5, 4), dpi=100)
 a = f.add_subplot(111)
-dh = DataHandler(creds=json.loads(open('./secrets/creds.json', 'r').read()))
+dh = DataHandler(creds=json.loads(open('secrets/custom_credentials.json', 'r').read()))
 
 
 def animate(i):
@@ -62,7 +62,7 @@ class DataCore(tk.Tk):
         menubar.add_cascade(label="File", menu=filemenu)
         actionsmenu = tk.Menu(menubar, tearoff=0)
         actionsmenu.add_command(label='Reset Credentials',
-                                command=lambda: dh.update_engines(json.loads(open('./secrets/creds.json', 'r').read())))
+                                command=lambda: dh.update_engines(json.loads(open('secrets/custom_credentials.json', 'r').read())))
         actionsmenu.add_command(label='Run Pivot Tables',
                                 command=lambda: dh.pivot_db_tables(['wp_commentmeta',
                                                                     'wp_postmeta',
