@@ -1,5 +1,6 @@
 /data
+/temp
 /secrets
 /modules/__pycache__/
-.idea
 /modules/.gitignore
+.idea

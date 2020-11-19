@@ -13,10 +13,13 @@ def load_custom_credentials():
 if __name__ == '__main__':
     my_credentials = load_custom_credentials()
     auditor = Auditor(credentials=my_credentials)
+
     dh = auditor.data_handler
     api = auditor.api_handler
 
-    pitt = dh.engines['pitt_engine']
-    loc = dh.engines['docker_engine']
-    lite = dh.engines['sqlite_engine']
+    pitt = auditor.default_pitt_engine
+    loc = auditor.default_loc_engine
+    lite = auditor.default_lite_engine
     gm = api.apis['google_maps_place']
+
+    ra = auditor.run_auditor()
