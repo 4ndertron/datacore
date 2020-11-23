@@ -1,13 +1,10 @@
-from sqlalchemy import create_engine
-from modules.module_enums import Engines
-from modules.module_enums import Messages
-from modules.module_enums import SQLText
-from modules.module_enums import HandlerParams as hp
+import modules as pm  # pm being an acronym for project_modules
 
 
-class EngineHandler:
+class SqlEngineCore:
     def __init__(self, *args, **kwargs):
-        self.valid_parameters = hp.valid_params.value
+        pm.logging.debug(f'running init of class EngineHandler in {__name__}')
+        self.valid_parameters = pm.HandlerParams.valid_params.value
         self.dialect = kwargs.get('dialect')
         self.driver = kwargs.get('driver')
         self.user = kwargs.get('user')
@@ -27,9 +24,9 @@ class EngineHandler:
             url = f'{self.dialect}{self.driver}://{self.user}:{self.pswd}@' \
                   f'{self.host}:{self.port}{self.database}'
         if self.conn_args is None:
-            self.engine = create_engine(url)
+            self.engine = pm.sa.create_engine(url)
         else:
-            self.engine = create_engine(url, connect_args=self.conn_args)
+            self.engine = pm.sa.create_engine(url, connect_args=self.conn_args)
 
     def _create_conn(self):
         self.conn = self.engine.connect()
@@ -52,14 +49,14 @@ class EngineHandler:
             if k in self.valid_parameters:
                 returns.append(k)
         if len(returns) == 0:
-            return Messages.no_valid_parameters.value
+            return pm.Messages.no_valid_parameters.value
         else:
             self._setup_engine()
-            return f'{Messages.updated_valid_parameters.value}{",".join(returns)}'
+            return f'{pm.Messages.updated_valid_parameters.value}{",".join(returns)}'
 
     def schema_exists(self, schema_name):
         self._create_conn()
-        schemas = [x[1] for x in self.conn.execute(SQLText.select_schemas.value).fetchall()]
+        schemas = [x[1] for x in self.conn.execute(pm.SQLText.select_schemas.value).fetchall()]
         self._close_conn()
         return schema_name in schemas
 
@@ -68,7 +65,7 @@ class EngineHandler:
             return f'{schema_name} exists'
         else:
             self._create_conn()
-            self.conn.execute(SQLText.create_schema_sql.value.text % schema_name)
+            self.conn.execute(pm.SQLText.create_schema_sql.value.text % schema_name)
             self._close_conn()
             return f'{schema_name} created'
 

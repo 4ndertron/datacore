@@ -1,7 +1,5 @@
-import re
+from . import *
 from enum import Enum
-from . import sa
-from . import dt
 
 
 class HandlerParams(Enum):
@@ -142,6 +140,7 @@ class RegexText(Enum):
     wpengine_table_prefix_rt = r'wp_'
     wpengine_meta_suffix_rt = r'meta'
     pivot_schema_suffix_rt = r'_pivot'
+    jn_export_entity_rt = r'All (.*) Columns'
 
 
 class Regex(Enum):
@@ -150,6 +149,7 @@ class Regex(Enum):
     wpengine_table_prefix = re.compile(RegexText.wpengine_table_prefix_rt.value)
     wpengine_meta_suffix = re.compile(RegexText.wpengine_meta_suffix_rt.value)
     pivot_schema_suffix = re.compile(RegexText.pivot_schema_suffix_rt.value)
+    jn_export_entity = re.compile(RegexText.jn_export_entity_rt.value)
 
 
 class DateTimes(Enum):

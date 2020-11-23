@@ -25,7 +25,7 @@ class CrawlerBase:
     CrawlerBase is a web crawler, that will login to a website provide the Login link
     The Username, Password, and submit button html ID's and the values to be entered
     """
-    chrome_driver = r'C:\\Users\\jonathan.lauret\\Google Drive\\Projects\\Chrome Driver\chromedriver.exe'
+    chrome_driver = os.path.join(os.environ['userprofile'], '')
     firefox_driver = r'C:\\Users\\jonathan.lauret\\Google Drive\\Projects\\Chrome Driver\geckodriver.exe'
     delay = 10
 
