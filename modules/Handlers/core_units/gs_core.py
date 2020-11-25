@@ -1,7 +1,4 @@
-from . import *
-import pickle
-import os.path
-import pandas as pd
+import modules as pm
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -9,16 +6,16 @@ from google.auth.transport.requests import Request
 
 class GSheet:
     def __init__(self, sheet_id, **kwargs):
-        logging.debug(f'running init of class GMapPlace in {__name__}')
-        self.SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+        pm.logging.debug(f'running init of class GMapPlace in {__name__}')
+        self.SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
         self.init_kwargs = kwargs
-        self.init_kwarg_df = pd.DataFrame({k: [v] for k, v in kwargs.items()})
+        self.init_kwarg_df = pm.pd.DataFrame({k: [v] for k, v in kwargs.items()})
         self.creds = None
         self.service = None
         self.sheet_id = sheet_id
-        self.pickle_path = os.path.join(os.environ['userprofile'], 'PycharmProjects', 'datacore', 'secrets',
+        self.pickle_path = pm.os.path.join(pm.os.environ['userprofile'], 'PycharmProjects', 'datacore', 'secrets',
                                         'token.pickle')
-        self.cred_path = os.path.join(os.environ['userprofile'], 'PycharmProjects', 'datacore', 'secrets',
+        self.cred_path = pm.os.path.join(pm.os.environ['userprofile'], 'PycharmProjects', 'datacore', 'secrets',
                                       'client_secret.json')
         self._set_service()
         self.sheet = self.service.spreadsheets()
@@ -28,10 +25,10 @@ class GSheet:
         # The file token.pickle stores the user's access and refresh tokens, and is
         # created automatically when the authorization flow completes for the first
         # time.
-        logging.debug(f'running _set_service in GSheet')
-        if os.path.exists(self.pickle_path):
+        pm.logging.debug(f'running _set_service in GSheet')
+        if pm.os.path.exists(self.pickle_path):
             with open(self.pickle_path, 'rb') as token:
-                self.creds = pickle.load(token)
+                self.creds = pm.pickle.load(token)
         # If there are no (valid) credentials available, let the user log in.
         if not self.creds or not self.creds.valid:
             if self.creds and self.creds.expired and self.creds.refresh_token:
@@ -42,7 +39,7 @@ class GSheet:
                 self.creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
             with open(self.pickle_path, 'wb') as token:
-                pickle.dump(self.creds, token)
+                pm.pickle.dump(self.creds, token)
 
         self.service = build('sheets', 'v4', credentials=self.creds)
 
@@ -54,7 +51,7 @@ class GSheet:
         :param val_col_int: The column number with the values you want returned
         :return: a list containing all the values in the specified column within the range.
         """
-        logging.debug(f'running gather_column in GSheet')
+        pm.logging.debug(f'running gather_column in GSheet')
         result = self.sheet.values().get(spreadsheetId=self.sheet_id,
                                          range=sheet_range).execute()
         values = result.get('values', [])
@@ -69,7 +66,7 @@ class GSheet:
         :param sheet_range: The range in the sheet you want the values from.
         :return: a list of list of the values in the range.
         """
-        logging.debug(f'running gather_range_values in GSheet')
+        pm.logging.debug(f'running gather_range_values in GSheet')
         result = self.sheet.values().get(
             spreadsheetId=self.sheet_id,
             range=sheet_range
@@ -87,7 +84,7 @@ class GSheet:
         :param list_of_list_data: a list of list data set that you want added to the bottom of the range.
         :return: the api response after executing the request.
         """
-        logging.debug(f'running append_range in GSheet')
+        pm.logging.debug(f'running append_range in GSheet')
         new_records = {
             'majorDimension': 'ROWS',
             'values': list_of_list_data
@@ -109,7 +106,7 @@ class GSheet:
         :param list_of_list_data: a list of list data set that is the size of the sheet range.
         :return: the api response after executing the request.
         """
-        logging.debug(f'running update_range in GSheet')
+        pm.logging.debug(f'running update_range in GSheet')
         new_records = {
             # 'majorDimensions:': 'ROWS',
             'values': list_of_list_data
@@ -122,7 +119,3 @@ class GSheet:
         )
         response = request.execute()
         return response
-
-
-if __name__ == '__main__':
-    gs = GSheet(sheet_id='1JH7x89nosp4gCJLAWZ9CkzJroxBnhMhIMqGTF7I6jm0')

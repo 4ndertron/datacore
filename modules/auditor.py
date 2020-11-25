@@ -22,9 +22,14 @@ class Auditor:
         self.credentials = kwargs.get('credentials')
         self.data_handler = pm.DataHandler(credentials=self.credentials.get('databases'))
         self.api_handler = pm.ApiHandler(credentials=self.credentials.get('requests'))
+        self.gs_handler = pm.GSheetHandler(credentials=self.credentials.get('sheets'))
+        self.default_dl_dir = pm.user_dl_dir
         self.default_pitt_engine = self.data_handler.engines['pitt_engine']
         self.default_loc_engine = self.data_handler.engines['docker_engine']
         self.default_lite_engine = self.data_handler.engines['sqlite_engine']
+        self.default_bucket_sheet = self.gs_handler.gsd['boards_workbook']
+        self.default_status_change_sheet = self.gs_handler.gsd['status_changes']
+        self.default_l10_sheet = self.gs_handler.gsd['corporate_l-10']
         self._setup_untracked_directories()
 
     def _setup_untracked_directories(self):
@@ -33,15 +38,10 @@ class Auditor:
         This method will ensure those directories exists.
         """
         directories = {}
-        if not pm.os.path.exists(pm.database_dir):
-            pm.os.makedirs(pm.database_dir)
-            directories[pm.database_dir] = True
-        if not pm.os.path.exists(pm.secrets_dir):
-            pm.os.makedirs(pm.secrets_dir)
-            directories[pm.secrets_dir] = True
-        if not pm.os.path.exists(pm.temp_dir):
-            pm.os.makedirs(pm.temp_dir)
-            directories[pm.secrets_dir] = True
+        for project_dir in (pm.database_dir, pm.secrets_dir, pm.temp_dir):
+            if not pm.os.path.exists(project_dir):
+                pm.os.makedirs(project_dir)
+            directories[project_dir] = True
         self.directories = directories
 
     def address_validation(self, **kwargs):
@@ -117,6 +117,10 @@ class Auditor:
         formatted_string = pm.re.sub(' ', '_', string.lower())
         return formatted_string
 
+    def export_local_jn_db(self):
+        pm.logging.debug(f'running export_local_jn_db in Auditor')
+        return 0
+
     # noinspection PyTypeChecker
     def update_local_jn_db(self):
         """
@@ -186,9 +190,65 @@ class Auditor:
             }
         return returns
 
+    def populate_window_metrics(self):
+        """
+        Calculation Workflow:
+        1. Pull change logs to local env
+        2. push change logs to db
+        3. have sql calculate the "actual" metric.
+        4. Have loc env pull calculated actuals.
+        5. have loc env push actuals to this column.
+        """
+        pm.logging.debug(f'running populate_window_metrics in Auditor')
+        changes = self.pull_gs_data(gs_range="Test!D:G",
+                                    sheet=self.default_status_change_sheet,
+                                    table='status_changes',
+                                    engine=self.default_loc_engine.engine)
+        windows = self.pull_gs_data(gs_range="L10!C:J",
+                                    sheet=self.default_status_change_sheet,
+                                    table='status_windows',
+                                    engine=self.default_loc_engine.engine)
+        boards = self.pull_gs_data(gs_range="Union!A:F",
+                                   sheet=self.default_bucket_sheet,
+                                   table='board',
+                                   engine=self.default_loc_engine.engine)
+        gs_pushes = {'status_changes': changes, 'status_windows': windows, 'board': boards}
+        for tn, df in gs_pushes.items():
+            df.to_sql(tn,
+                      self.default_loc_engine.engine,
+                      schema='jobnimbus',
+                      index=False,
+                      if_exists='replace')
+        response = self.default_loc_engine.run_query_file()
+        # metrics = pm.pd.read_sql('select * from metrics.table', self.default_loc_engine, index_col='window_id')
+        # actuals = metrics.loc[:, 'actual']
+        # self.default_status_change_sheet.update_range(range='L10!I2:I',
+        #                                               data=actuals,
+        #                                               sheet=self.default_status_change_sheet)
+        return gs_pushes
+
+    def pull_gs_data(self, **kwargs):
+        pm.logging.debug(f'running pull_gs_data in Auditor')
+        gs_range = kwargs.get('gs_range')
+        sheet = kwargs.get('sheet')
+        table = kwargs.get('table')
+        engine = kwargs.get('engine')
+        sheet_values = sheet.gather_range_values(gs_range)
+        new_gs_df = pm.pd.DataFrame(sheet_values[1:], columns=sheet_values[:1][0])
+        try:
+            old_gs_df = pm.pd.read_sql(pm.SQLText.select_all_from_schema_table.value.text % ('jobnimbus', table),
+                                       engine)
+            return_df = old_gs_df.merge(new_gs_df, how='outer')
+        except Exception as e:
+            pm.logging.debug(e)
+            return_df = new_gs_df
+        return return_df.drop_duplicates(ignore_index=True)
+
     def run_auditor(self):
         d = self.update_local_jn_db()
+        wm = self.populate_window_metrics()
         return {
             'self': self,
             'd': d,
+            'wm': wm,
         }

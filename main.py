@@ -7,7 +7,7 @@ from modules.auditor import Auditor
 def load_custom_credentials():
     with open(os.path.join(secrets_dir, 'custom_credentials.json'), 'r') as cc:
         jt = json.loads(cc.read())
-        return jt
+        return jt  # specific durations wanted to look into.
 
 
 if __name__ == '__main__':
