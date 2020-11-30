@@ -133,6 +133,7 @@ class Auditor:
         """
         pm.logging.debug(f'running update_local_jn_db in Auditor')
         csv_dir = pm.temp_dir
+        pm.logging.debug(f'looking for jn files in {csv_dir}')
         files = pm.os.listdir(csv_dir)
         returns = {'exception': {
             'file': [],
@@ -140,33 +141,44 @@ class Auditor:
             'search': [],
             'entity': [],
             'df': [],
-            'dfe': []
+            'db_df': [],
+            'dfe': [],
         }}
         for file in files:
             full_file_path = pm.os.path.join(csv_dir, file)
             search = pm.Regex.jn_export_entity.value.search(file)
             file_entity = self.format_file_name(search.groups()[0])
             file_df = pm.pd.read_csv(full_file_path, header=0, keep_default_na=False)
+            conversion_map = pm.DfColumnConversion.loop_entities.value[file_entity]
+            pm.logging.debug(f'converting {file_entity} df with map: {conversion_map}')
+            file_df.astype(pm.DfColumnConversion.loop_entities.value[file_entity])
             try:
                 db_df = pm.pd.read_sql(pm.SQLText.select_all_from_schema_table.value.text % ('jobnimbus', file_entity),
                                        self.default_loc_engine.engine)
-                db_df.merge(file_df, how='outer', on='Id', copy=False)
-                dfe = db_df.apply(  # text-encoded DataFrame
-                    lambda x: x.apply(
-                        lambda y: '' if y == '' else
+                mdf = db_df.merge(file_df, how='outer')
+                dfe = mdf.apply(  # encode the text-type cells
+                    lambda x:
+                    x.apply(
+                        lambda y:
+                        pm.logging.debug(f'type(y) in col {x.title}:\n{type(y)}') if type(y) != pm.np.str else
                         pm.unicodedata.normalize('NFD', str(y)).encode('ascii', 'ignore')
                     )
                 )
             except Exception as e:
-                dfe = file_df.apply(  # text-encoded DataFrame
-                    lambda x: x.apply(
-                        lambda y: '' if y == '' else
+                pm.logging.debug(e)
+                db_df = None
+                dfe = file_df.apply(  # encode the text-type cells
+                    lambda x:
+                    x.apply(
+                        lambda y:
+                        pm.logging.debug(f'type(y) in col {x.title}:\n{type(y)}') if type(y) != pm.np.str else
                         pm.unicodedata.normalize('NFD', str(y)).encode('ascii', 'ignore')
                     )
                 )
             try:
-                pm.logging.debug(f'Pushing the text-encoded DataFrame derived from {file} to {file_entity} table'
-                                 f'into {self.default_loc_engine.engine.url} database.')
+                pm.logging.debug(f'Pushing the text-encoded DataFrame derived from {file} to {file_entity} table '
+                                 f'in {self.default_loc_engine.engine.url} database.')
+                dfe.drop_duplicates(inplace=True)
                 dfe.to_sql(file_entity,
                            self.default_loc_engine.engine,
                            schema='jobnimbus',
@@ -174,17 +186,19 @@ class Auditor:
                            index=False)
                 if pm.os.path.exists(full_file_path):
                     pm.logging.debug(f'deleting {full_file_path}')
-                    pm.os.remove(full_file_path)
+                    # pm.os.remove(full_file_path)
             except Exception as e:
                 returns['exception']['file'].append(file)
                 returns['exception']['e'].append(e)
                 returns['exception']['search'].append(search)
                 returns['exception']['entity'].append(file_entity)
                 returns['exception']['df'].append(file_df)
+                returns['exception']['db_df'].append(db_df)
                 returns['exception']['dfe'].append(dfe)
             returns[file] = {
                 'split': pm.os.path.splitext(file),
                 'df': file_df,
+                'db_df': db_df,
                 'dfe': dfe,
                 'entity': file_entity
             }
@@ -219,7 +233,7 @@ class Auditor:
                       schema='jobnimbus',
                       index=False,
                       if_exists='replace')
-        response = self.default_loc_engine.run_query_file()
+        # response = self.default_loc_engine.run_query_file()
         # metrics = pm.pd.read_sql('select * from metrics.table', self.default_loc_engine, index_col='window_id')
         # actuals = metrics.loc[:, 'actual']
         # self.default_status_change_sheet.update_range(range='L10!I2:I',

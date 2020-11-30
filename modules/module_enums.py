@@ -28,6 +28,55 @@ class WpEntities(Enum):
     user = 'user'
 
 
+class DfColumnConversion(Enum):
+    object = 'object'
+    int64 = 'int64'
+    float64 = 'float64'
+    bool = 'bool'
+    datetime64 = 'datetime64'
+    timedelta = 'timedelta'
+    category = 'category'
+    activity = {
+        'Date Created': datetime64,
+        'Date Updated': datetime64,
+    }
+    job = {
+        'Date Created': datetime64,
+        'Date Status Change': datetime64,
+        'Date Updated': datetime64,
+        'Days In Status': int64,
+    }
+    contact = {
+        'Date Created': datetime64,
+        'Date Status Change': datetime64,
+        'Date Updated': datetime64,
+        'Days In Status': int64,
+        'Start Date': datetime64,
+        'End Date': datetime64,
+        'Count': int64,
+    }
+    work_order = {
+        'Start Date': datetime64,
+        'End Date': datetime64,
+        'Date Created': datetime64,
+        'Date Updated': datetime64,
+        'Days In Status': int64,
+    }
+    task = {
+        'Start Date': datetime64,
+        'End Date': datetime64,
+        'Date Created': datetime64,
+        'Date Updated': datetime64,
+    }
+    loop_entities = {
+        'activity': activity,
+        'job': job,
+        'contact': contact,
+        'work_order': work_order,
+        'task': task,
+    }
+
+
 class JobNimbus_to_WPEngine_Mapping(Enum):
     """
     All of the dictionary types represent the WP Engine structure.
