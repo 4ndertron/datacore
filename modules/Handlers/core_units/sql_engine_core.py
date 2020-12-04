@@ -22,7 +22,7 @@ class SqlEngineCore:
             url = f'{self.dialect}:///{self.database}'
         else:
             url = f'{self.dialect}{self.driver}://{self.user}:{self.pswd}@' \
-                  f'{self.host}:{self.port}{self.database}'
+                  f'{self.host}:{self.port}/{self.database}'
         if self.conn_args is None:
             self.engine = pm.sa.create_engine(url)
         else:

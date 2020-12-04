@@ -20,6 +20,7 @@ if __name__ == '__main__':
     pitt = auditor.default_pitt_engine
     loc = auditor.default_loc_engine
     lite = auditor.default_lite_engine
+    pg11 = auditor.default_pg11_engine
     gm = api.apis['google_maps_place']
 
-    ra = auditor.run_auditor()
+    ra = auditor.run_auditor(use_engine=pg11)

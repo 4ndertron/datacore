@@ -13,6 +13,7 @@ class Auditor:
         6. Easily crackable passwords
         7. Illegal field characters
     """
+    TABLE_PREFIX = 'pd_'
 
     def __init__(self, **kwargs):
         pm.logging.debug(f'running init of class Auditor in {__name__}')
@@ -24,12 +25,15 @@ class Auditor:
         self.api_handler = pm.ApiHandler(credentials=self.credentials.get('requests'))
         self.gs_handler = pm.GSheetHandler(credentials=self.credentials.get('sheets'))
         self.default_dl_dir = pm.user_dl_dir
-        self.default_pitt_engine = self.data_handler.engines['pitt_engine']
-        self.default_loc_engine = self.data_handler.engines['docker_engine']
-        self.default_lite_engine = self.data_handler.engines['sqlite_engine']
-        self.default_bucket_sheet = self.gs_handler.gsd['boards_workbook']
-        self.default_status_change_sheet = self.gs_handler.gsd['status_changes']
-        self.default_l10_sheet = self.gs_handler.gsd['corporate_l-10']
+        self.default_pitt_engine = self.data_handler.engines.get('pitt_engine')
+        self.default_loc_engine = self.data_handler.engines.get('docker_engine')
+        self.default_pgo_engine = self.data_handler.engines.get('docker_pg_office')
+        self.default_pgr_engine = self.data_handler.engines.get('docker_pg_remote')
+        self.default_pg11_engine = self.data_handler.engines.get('docker_pg11')
+        self.default_lite_engine = self.data_handler.engines.get('sqlite_engine')
+        self.default_bucket_sheet = self.gs_handler.gsd.get('boards_workbook')
+        self.default_status_change_sheet = self.gs_handler.gsd.get('status_changes')
+        self.default_l10_sheet = self.gs_handler.gsd.get('corporate_l-10')
         self._setup_untracked_directories()
 
     def _setup_untracked_directories(self):
@@ -38,7 +42,7 @@ class Auditor:
         This method will ensure those directories exists.
         """
         directories = {}
-        for project_dir in (pm.database_dir, pm.secrets_dir, pm.temp_dir):
+        for project_dir in (pm.database_dir, pm.secrets_dir, pm.temp_dir, pm.sql_dir):
             if not pm.os.path.exists(project_dir):
                 pm.os.makedirs(project_dir)
             directories[project_dir] = True
@@ -122,7 +126,7 @@ class Auditor:
         return 0
 
     # noinspection PyTypeChecker
-    def update_local_jn_db(self):
+    def update_local_jn_db(self, **kwargs):
         """
         In order to use this method effectively, the following criteria must be met.
         1)  Export the contents of the report(s) "All Contact Columns" from JobNimbus as a CSV
@@ -132,6 +136,8 @@ class Auditor:
         and push that content into the Auditor's default local database environment.
         """
         pm.logging.debug(f'running update_local_jn_db in Auditor')
+        update_engine = kwargs.get('update_engine') if kwargs.get(
+            'update_engine') is not None else self.default_pgo_engine
         csv_dir = pm.temp_dir
         pm.logging.debug(f'looking for jn files in {csv_dir}')
         files = pm.os.listdir(csv_dir)
@@ -146,65 +152,79 @@ class Auditor:
         }}
         for file in files:
             full_file_path = pm.os.path.join(csv_dir, file)
+
             search = pm.Regex.jn_export_entity.value.search(file)
             file_entity = self.format_file_name(search.groups()[0])
-            file_df = pm.pd.read_csv(full_file_path, header=0, keep_default_na=False)
+
+            default_schema = 'public'
+            table_name = f'{self.TABLE_PREFIX}{file_entity}'
+            query_tuple = (default_schema, table_name)
+
             conversion_map = pm.DfColumnConversion.loop_entities.value[file_entity]
+
+            file_df = pm.pd.read_csv(full_file_path, header=0, keep_default_na=False)
+
             pm.logging.debug(f'converting {file_entity} df with map: {conversion_map}')
-            file_df.astype(pm.DfColumnConversion.loop_entities.value[file_entity])
+            file_df_convert = file_df.astype(pm.DfColumnConversion.loop_entities.value[file_entity])
+
             try:
-                db_df = pm.pd.read_sql(pm.SQLText.select_all_from_schema_table.value.text % ('jobnimbus', file_entity),
-                                       self.default_loc_engine.engine)
-                mdf = db_df.merge(file_df, how='outer')
-                dfe = mdf.apply(  # encode the text-type cells
-                    lambda x:
-                    x.apply(
-                        lambda y:
-                        pm.logging.debug(f'type(y) in col {x.title}:\n{type(y)}') if type(y) != pm.np.str else
-                        pm.unicodedata.normalize('NFD', str(y)).encode('ascii', 'ignore')
-                    )
-                )
+                db_df = pm.pd.read_sql(pm.SQLText.select_all_from_schema_table.value.text % query_tuple,
+                                       update_engine.engine)
+                mdf = db_df.merge(file_df_convert, how='outer')
+                dfe = mdf
+                # dfe = mdf.apply(  # encode the text-type cells
+                #     lambda x:
+                #     x.apply(
+                #         lambda y:
+                #         pm.logging.debug(f'type(y) in col {x.title}:\n{type(y)}') if type(y) != pm.np.str else
+                #         pm.unicodedata.normalize('NFD', str(y)).encode('ascii', 'ignore')
+                #     )str
+                # )
             except Exception as e:
                 pm.logging.debug(e)
                 db_df = None
-                dfe = file_df.apply(  # encode the text-type cells
-                    lambda x:
-                    x.apply(
-                        lambda y:
-                        pm.logging.debug(f'type(y) in col {x.title}:\n{type(y)}') if type(y) != pm.np.str else
-                        pm.unicodedata.normalize('NFD', str(y)).encode('ascii', 'ignore')
-                    )
-                )
+                dfe = file_df_convert
+                # dfe = file_df.apply(  # encode the text-type cells
+                #     lambda x:
+                #     x.apply(
+                #         lambda y:
+                #         pm.logging.debug(f'type(y) in col empy:\n{type(y)}') if type(y) != pm.np.str else
+                #         pm.unicodedata.normalize('NFD', str(y)).encode('ascii', 'ignore')
+                #     )
+                # )
             try:
-                pm.logging.debug(f'Pushing the text-encoded DataFrame derived from {file} to {file_entity} table '
-                                 f'in {self.default_loc_engine.engine.url} database.')
+                pm.logging.info(f'Pushing the text-encoded DataFrame derived from {file} to {file_entity} table '
+                                f'in {update_engine.engine.url} database.')
                 dfe.drop_duplicates(inplace=True)
-                dfe.to_sql(file_entity,
-                           self.default_loc_engine.engine,
-                           schema='jobnimbus',
+                pm.logging.info(f'dropped duplicates for {file_entity} dfe')
+                pm.logging.debug(f'pushing {table_name} to {default_schema}')
+                dfe.to_sql(table_name,
+                           update_engine.engine,
+                           schema=default_schema,
                            if_exists='replace',
                            index=False)
+                pm.logging.info(f'to_sql for active dfe has executed to {file_entity} from {full_file_path}')
                 if pm.os.path.exists(full_file_path):
                     pm.logging.debug(f'deleting {full_file_path}')
-                    # pm.os.remove(full_file_path)
+                    pm.os.remove(full_file_path)
             except Exception as e:
                 returns['exception']['file'].append(file)
                 returns['exception']['e'].append(e)
                 returns['exception']['search'].append(search)
                 returns['exception']['entity'].append(file_entity)
-                returns['exception']['df'].append(file_df)
+                returns['exception']['df'].append(file_df_convert)
                 returns['exception']['db_df'].append(db_df)
                 returns['exception']['dfe'].append(dfe)
             returns[file] = {
                 'split': pm.os.path.splitext(file),
-                'df': file_df,
+                'df': file_df_convert,
                 'db_df': db_df,
                 'dfe': dfe,
-                'entity': file_entity
+                'entity': file_entity,
             }
         return returns
 
-    def populate_window_metrics(self):
+    def populate_window_metrics(self, **kwargs):
         """
         Calculation Workflow:
         1. Pull change logs to local env
@@ -214,23 +234,27 @@ class Auditor:
         5. have loc env push actuals to this column.
         """
         pm.logging.debug(f'running populate_window_metrics in Auditor')
+        update_engine = kwargs.get('update_engine') if kwargs.get(
+            'update_engine') is not None else self.default_pgo_engine
+        if update_engine is None:
+            update_engine = self.default_pgo_engine
         changes = self.pull_gs_data(gs_range="Test!D:G",
                                     sheet=self.default_status_change_sheet,
                                     table='status_changes',
-                                    engine=self.default_loc_engine.engine)
+                                    engine=update_engine.engine)
         windows = self.pull_gs_data(gs_range="L10!C:J",
                                     sheet=self.default_status_change_sheet,
                                     table='status_windows',
-                                    engine=self.default_loc_engine.engine)
+                                    engine=update_engine.engine)
         boards = self.pull_gs_data(gs_range="Union!A:F",
                                    sheet=self.default_bucket_sheet,
                                    table='board',
-                                   engine=self.default_loc_engine.engine)
+                                   engine=update_engine.engine)
         gs_pushes = {'status_changes': changes, 'status_windows': windows, 'board': boards}
         for tn, df in gs_pushes.items():
-            df.to_sql(tn,
-                      self.default_loc_engine.engine,
-                      schema='jobnimbus',
+            df.to_sql(f'{self.TABLE_PREFIX}{tn}',
+                      update_engine.engine,
+                      schema='public',
                       index=False,
                       if_exists='replace')
         # response = self.default_loc_engine.run_query_file()
@@ -250,7 +274,7 @@ class Auditor:
         sheet_values = sheet.gather_range_values(gs_range)
         new_gs_df = pm.pd.DataFrame(sheet_values[1:], columns=sheet_values[:1][0])
         try:
-            old_gs_df = pm.pd.read_sql(pm.SQLText.select_all_from_schema_table.value.text % ('jobnimbus', table),
+            old_gs_df = pm.pd.read_sql(pm.SQLText.select_all_from_schema_table.value.text % ('public', table),
                                        engine)
             return_df = old_gs_df.merge(new_gs_df, how='outer')
         except Exception as e:
@@ -258,9 +282,10 @@ class Auditor:
             return_df = new_gs_df
         return return_df.drop_duplicates(ignore_index=True)
 
-    def run_auditor(self):
-        d = self.update_local_jn_db()
-        wm = self.populate_window_metrics()
+    def run_auditor(self, **kwargs):
+        use_engine = kwargs.get('use_engine') if kwargs.get('use_engine') is not None else self.default_pgo_engine
+        d = self.update_local_jn_db(update_engine=use_engine)
+        wm = self.populate_window_metrics(update_engine=use_engine)
         return {
             'self': self,
             'd': d,

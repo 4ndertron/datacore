@@ -1,0 +1,11 @@
+Django
+psycopg2-binary
+requests
+numpy
+pandas
+python-dateutil
+psycopg2
+sqlalchemy
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib

@@ -13,10 +13,8 @@ class GSheet:
         self.creds = None
         self.service = None
         self.sheet_id = sheet_id
-        self.pickle_path = pm.os.path.join(pm.os.environ['userprofile'], 'PycharmProjects', 'datacore', 'secrets',
-                                        'token.pickle')
-        self.cred_path = pm.os.path.join(pm.os.environ['userprofile'], 'PycharmProjects', 'datacore', 'secrets',
-                                      'client_secret.json')
+        self.pickle_path = pm.os.path.join(pm.secrets_dir, 'token.pickle')
+        self.cred_path = pm.os.path.join(pm.secrets_dir, 'client_secret.json')
         self._set_service()
         self.sheet = self.service.spreadsheets()
 

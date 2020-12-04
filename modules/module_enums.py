@@ -77,7 +77,7 @@ class DfColumnConversion(Enum):
     }
 
 
-class JobNimbus_to_WPEngine_Mapping(Enum):
+class JobNimbusToWPEngineMapping(Enum):
     """
     All of the dictionary types represent the WP Engine structure.
     All of the list types represent the JobNimbus column names.

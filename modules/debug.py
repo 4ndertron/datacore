@@ -1,4 +1,4 @@
-from . import project_dir
+import modules as pm
 
 if __name__ == '__main__':
-    print(project_dir)
+    print(pm.test_project_dir)

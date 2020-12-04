@@ -356,7 +356,7 @@ class DataHandler:
 
         pm.logging.debug(post_title)
 
-        post_type_template = pm.JobNimbus_to_WPEngine_Mapping.conversion_map.value[post_type]['post']
+        post_type_template = pm.JobNimbusToWPEngineMapping.conversion_map.value[post_type]['post']
         post_type_template['post_type'] = post_type
         post_type_template['post_author'] = creator_id
         post_type_template['post_title'] = post_title
